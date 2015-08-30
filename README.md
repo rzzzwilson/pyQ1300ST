@@ -1,5 +1,4 @@
-##This is currently on hold until I get a Linux box running.
-##I need Linux because OSX 10.? removed support for the chip in the BT-Q1300ST.
+##Development moved to a linux box because OSX 10.? removed support for the chip in the BT-Q1300ST.
 
 This is a rewrite of mtkbabel-0.8.3.1 from [http://sourceforge.net/projects/mtkbabel/].
 This version will try to be more pythonic in things like reading from the device (use
