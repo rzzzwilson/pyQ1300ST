@@ -51,12 +51,9 @@ import log
 Version = 'pymtkbabel 0.1'
 
 # serial port and speed defauts
-#DefaultPort = '/dev/tty.usbmodem1410'
 MinPortSpeed = 300
 MaxPortSpeed = 115200
 DefaultPortSpeed = MaxPortSpeed
-#DefaultPortPrefix = '/dev/tty.usb*'
-#DefaultPortPrefix = '/dev/ttys*'
 DefaultPortPrefix = '/dev/tty*'
 
 # debug level stuff
@@ -141,14 +138,19 @@ class QStarz(object):
         self.sane = True
 
         if device is None:
-            device = self.find_device(speed)
-
+            log.debug('QStartz object must be given a valid port, not None')
+            raise RuntimeError('QStartz object must be given a valid port, not None')
         try:
             self.serial = serial.Serial(port=device, baudrate=speed, timeout=0)
         except OSError:
             log.debug('device %s is not sane' % device)
             self.sane = False
             return
+        except serial.SerialException:
+            log.debug('device %s is not readable' % device)
+            self.sane = False
+            return
+            
         if not self.send('PMTK000'):
             log.debug('device %s is not sane' % device)
             self.sane = False
@@ -210,9 +212,9 @@ class QStarz(object):
 
         return True
 
-    def __del__(self):
-        if self.serial:
-            del self.serial
+#    def __del__(self):
+#        if self.serial:
+#            del self.serial
 
     def read_memory(self):
         """Read device memory."""
@@ -344,7 +346,7 @@ class QStarz(object):
 
 def find_device(speed):
     """Find the device amongst /dev/*.
-    
+
     Use the given device speed.  Looks under DefaultDevicePath.
     Return None if not found.
     """
@@ -641,6 +643,7 @@ def get_tty_port():
     """
 
     ports = glob.glob(DefaultPortPrefix)
+    log.debug('get_tty_port() returns:\n%s' % str(ports))
     return ports
 
 
@@ -783,6 +786,7 @@ def main(argv=None):
     # set default values
     port = None
     ports = get_tty_port()
+    log.debug('get_tty_port() returned:\n%s' % str(ports))
     if len(ports) == 1:
         port = ports[0]
     speed = DefaultPortSpeed
@@ -810,11 +814,13 @@ def main(argv=None):
 
     # create QStarz object, if possible
     if port is None:
+        print('Calling find_device(%d)' % speed)
         port = find_device(speed)
         if port is None:
             log.critical('No port specified & none found, choices: %s' % ', '.join(ports))
             print('No port specified & none found, choices: %s' % ', '.join(ports))
             return 1
+
     gps = QStarz(port, speed)
     if not gps.init():
         log.debug('Device is %s, speed %d is not a QStarz device' % (str(port), speed))
