@@ -13,6 +13,11 @@ debugging quicker.
 The file data2kml.py converts a GPX file output by mtkbabel.pl into a Google Earth
 KML file.
 
+The files *PinkBus2.kml* and *Walking_21August2014.kml* are two KML files produced
+by data2kml.py from real data.  *PinkBus2.kml* is the track followed by a Phuket
+pink bus (number 2).  *Walking_21August2014.kml* is just a simple file from a test
+walk around my area.
+
 NOTE: the original development of this was done on OSX.  Unfortunately, since
 Yosemite (10.10) the QStarz BT-Q1300ST device isn't mounted under OSX.  Development
 was switched to Linux (XUbuntu) at that point.
