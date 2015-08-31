@@ -13,10 +13,10 @@ import serial
 import log
 
 
-class QStarz(object):
-    """Class to handle comms with chip in QStarz logger."""
+class Q1300ST(object):
+    """Class to handle comms with chip in QStarz BT-Q1300ST logger."""
 
-    DefaultPortPrefix = '/dev/tty*'
+    DefaultDevicePath = '/dev/tty*'
     PortSpeeds = [115200, 38400, 9600, 4800, 1200]
 
     Timeout = 0.50          # sec, make bigger if device is slow
@@ -71,7 +71,7 @@ class QStarz(object):
             log.debug('device %s is not readable' % device)
             self.sane = False
             return
-            
+
         if not self.send('PMTK000'):
             log.debug('device %s is not sane' % device)
             self.sane = False
@@ -80,11 +80,11 @@ class QStarz(object):
 
         ret = self.recv('PMTK001,0,')
         if not ret or not ret.startswith('PMTK001,0,'):
-            log.debug('device %s is not a QStarz device' % device)
+            log.debug('device %s is not a Q1300ST device' % device)
             self.sane = False
             return
 
-        log.debug('device %s is a QStarz device' % device)
+        log.debug('device %s is a Q1300ST device' % device)
         self.sane = True
 
     def init(self):
@@ -94,43 +94,43 @@ class QStarz(object):
         self.send('PMTK604')
         ret = self.recv('PMTK001,604,')
         self.version = ret.split(',')[2]
-    
+
         self.send('PMTK605')
         ret = self.recv('PMTK705,')
         ret_list = ret.split(',')
         self.release = ret_list[1]
         self.model_id = ret_list[2]
-    
-        log.info('QStarz: MTK Firmware: Version %s, Release %s, Model ID %s' % (self.version, self.release, self.model_id))
-    
+
+        log.info('Q1300ST: ******** MTK Firmware: Version %s, Release %s, Model ID %s' % (self.version, self.release, self.model_id))
+
         # query log format
         self.send('PMTK182,2,2')
         ret = self.recv('PMTK182,3,2,')
         fmt = ret.split(',')[3]
         self.log_format = int(fmt, 16)
-        log.info('QStarz: Log format: %s' % describe_log_format(self.log_format))
-    
+        log.info('Q1300ST: ******** Log format: %s' % self.describe_log_format(self.log_format))
+
         self.send('PMTK182,2,6')
         self.recv('PMTK001,182,2,3')
         method = self.recv('PMTK182,3,6,')
         self.rec_method = int(method.split(',')[3])
-        log.info('QStarz: Recording method on memory full: %s' % describe_recording_method(self.rec_method))
-    
+        log.info('Q1300ST: ******** Recording method on memory full: %s' % self.describe_recording_method(self.rec_method))
+
         # query RCD_ADDR data
         self.send('PMTK182,2,8')
         ret = self.recv('PMTK182,3,8')
         self.recv('PMTK001,182,2,3')
         if ret:
             self.next_write_address = int(ret.split(',')[3], 16)
-            log.info('QStarz: Next write address: 0x%04x (%d)' % (self.next_write_address, self.next_write_address))
-    
+            log.info('Q1300ST: ******** Next write address: 0x%04x (%d)' % (self.next_write_address, self.next_write_address))
+
         # query number of records written
         self.send('PMTK182,2,10')
         ret = self.recv('PMTK182,3,10')
         self.send('PMTK001,182,2,3')
         if ret:
             self.expected_records_total = ret.split(',')[3]
-            log.info('QStarz: Number of records: %s (%d)' % (self.expected_records_total, int(self.expected_records_total, 16)))
+            log.info('Q1300ST: ******** Number of records: %s (%d)' % (self.expected_records_total, int(self.expected_records_total, 16)))
 
         return True
 
@@ -155,11 +155,11 @@ class QStarz(object):
             if self.next_write_address % SIZEOF_SECTOR:
                 sectors += 1
             bytes_to_read = sectors * SIZEOF_SECTOR
-    
+
         log.info('Retrieving %d (0x%08x) bytes of log data from device' % (bytes_to_read, bytes_to_read))
-    
+
         non_written_sector_found = False
-    
+
         offset = 0
         data = ''
         while offset < bytes_to_read:
@@ -170,7 +170,7 @@ class QStarz(object):
                 data += buff
                 offset += SIZEOF_CHUNK
             self.recv('PMTK001,182,7,3', 10)
-    
+
         data = data.decode('hex')
         log.debug('%d bytes read (expected %d), len(data)=%d' % (offset, bytes_to_read, len(data)))
         self.memory = data
@@ -193,31 +193,31 @@ class QStarz(object):
         try:
             self.serial.write(msg)
         except serial.SerialException:
-            log.debug('QStarz.send: failed')
+            log.debug('Q1300ST.send: failed')
             return False
-        log.debug('QStarz.send: %s' % msg[:-2])
+        log.debug('Q1300ST.send: %s' % msg[:-2])
         return True
 
     def recv(self, prefix, timeout=Timeout):
         """Receive message with given prefix."""
 
         max_time = time.time() + timeout
-    
+
         while True:
             pkt = self.read_pkt(timeout=timeout)
             if pkt.startswith(prefix):
-                log.debug('QStarz.recv: Got desired packet: %s' % prefix)
+                log.debug('Q1300ST.recv: Got desired packet: %s' % prefix)
                 return pkt
             if time.time() > max_time:
                 log.info('##################### packet_wait: timeout')
                 break
             time.sleep(0.01)
-    
+
         return None
 
     def read_pkt(self, timeout=None):
         """Read a packet from the device.
-        
+
         timeout  read timeout in seconds
         """
 
@@ -237,7 +237,7 @@ class QStarz(object):
                 # get packet, check checksum
                 pkt = result[1:-5]
                 checksum = result[-4:-2]
-                log.debug("QStarz.read_pkt: pkt='%s', checksum='%s'"
+                log.debug("Q1300ST.read_pkt: pkt='%s', checksum='%s'"
                           % (str(pkt), checksum))
                 if checksum != self.msg_checksum(pkt):
                     log.info('Checksum error on read, got %s expected %s' %
@@ -262,150 +262,117 @@ class QStarz(object):
             result ^= ord(ch)
         return result
 
-def describe_recording_method(method):
-    if method == self.RCD_METHOD_OVF:
-        return 'OVERLAP'
-    if method == self.RCD_METHOD_STP:
-        return 'STOP'
+    @staticmethod
+    def find_devices(speed):
+        """Find any Q1300ST devices.
 
+        Use the given device speed.  Looks under DefaultDevicePath.
+        Return a list of found devices, [] if not found.
+        """
 
-def describe_log_format(log_format):
-    result = []
+        log.debug('find_devices: speed=%d' % speed)
+        result = []
 
-    if log_format | self.LOG_FORMAT_UTC: result.append('UTC')
-    if log_format | self.LOG_FORMAT_VALID: result.append('VALID')
-    if log_format | self.LOG_FORMAT_LATITUDE: result.append('LATITUDE')
-    if log_format | self.LOG_FORMAT_LONGITUDE: result.append('LONGITUDE')
-    if log_format | self.LOG_FORMAT_HEIGHT: result.append('HEIGHT')
-    if log_format | self.LOG_FORMAT_SPEED: result.append('SPEED')
-    if log_format | self.LOG_FORMAT_HEADING: result.append('HEADING')
-    if log_format | self.LOG_FORMAT_DSTA: result.append('DSTA')
-    if log_format | self.LOG_FORMAT_DAGE: result.append('DAGE')
-    if log_format | self.LOG_FORMAT_PDOP: result.append('PDOP')
-    if log_format | self.LOG_FORMAT_HDOP: result.append('HDOP')
-    if log_format | self.LOG_FORMAT_VDOP: result.append('VDOP')
-    if log_format | self.LOG_FORMAT_NSAT: result.append('NSAT')
-    if log_format | self.LOG_FORMAT_SID: result.append('SID')
-    if log_format | self.LOG_FORMAT_ELEVATION: result.append('ELEVATION')
-    if log_format | self.LOG_FORMAT_AZIMUTH: result.append('AZIMUTH')
-    if log_format | self.LOG_FORMAT_SNR: result.append('SNR')
-    if log_format | self.LOG_FORMAT_RCR: result.append('RCR')
-    if log_format | self.LOG_FORMAT_MILLISECOND: result.append('MILLISECOND')
-    if log_format | self.LOG_FORMAT_DISTANCE: result.append('DISTANCE')
+        for device in glob.glob(Q1300ST.DefaultDevicePath):
+            if device == '/dev/tty':
+                # don't interrogate the console!
+                continue
 
-    return ','.join(result)
+            if Q1300ST.check_device(device, speed):
+                result.append(device)
 
+        log.debug('find_device: returning: %s' % str(result))
+        return result
 
-def send(ser, msg):
-    checksum = msg_checksum(msg)
-    msg = '$%s*%02x\r\n' % (msg, checksum)
-    try:
-        ser.write(msg)
-    except serial.SerialException:
-        log.debug('QStarz.send: failed')
-        return False
-    log.debug('QStarz.send: %s' % msg[:-2])
-    return True
+    @staticmethod
+    def check_device(device, speed):
+        """Check given device at given speed."""
 
+        log.debug('check_device: checking device %s at speed %d' % (device, speed))
 
-def recv(ser, prefix, timeout=QStarz.Timeout):
-    """Receive message with given prefix."""
+        gps = None
+        try:
+            gps = Q1300ST(device, speed)
+        except serial.SerialError:
+            del gps
+            return False
 
-    max_time = time.time() + timeout
+        if gps and gps.sane:
+            del gps
+            return True
 
-    while True:
-        pkt = ser.read_pkt(timeout=timeout)
-        log.debug("QStarz.recv: prefix='%s', pkt='%-40s'" % (prefix, pkt))
-        if pkt.startswith(prefix):
-            log.debug('QStarz.recv: Got desired packet: %s' % prefix)
-            return pkt
-        if time.time() > max_time:
-            log.info('##################### packet_wait: timeout')
-            break
-        time.sleep(0.1)
-
-    return None
-
-
-def check_device(device, speed):
-    """Check given device at given speed."""
-
-    log.debug('check_device: checking device %s at speed %d' % (device, speed))
-
-    gps = None
-    try:
-        gps = QStarz(device, speed)
-    except serial.SerialError:
-        del gps
         return False
 
-    if gps and gps.sane:
-        del gps
-        return True
+    @staticmethod
+    def describe_recording_method(method):
+        if method == Q1300ST.RCD_METHOD_OVF:
+            return 'OVERLAP'
+        if method == Q1300ST.RCD_METHOD_STP:
+            return 'STOP'
 
-    return False
+    @staticmethod
+    def describe_log_format(log_format):
+        result = []
 
-def find_devices(speed):
-    """Find the QStarz devices amongst /dev/*.
+        if log_format | Q1300ST.LOG_FORMAT_UTC: result.append('UTC')
+        if log_format | Q1300ST.LOG_FORMAT_VALID: result.append('VALID')
+        if log_format | Q1300ST.LOG_FORMAT_LATITUDE: result.append('LATITUDE')
+        if log_format | Q1300ST.LOG_FORMAT_LONGITUDE: result.append('LONGITUDE')
+        if log_format | Q1300ST.LOG_FORMAT_HEIGHT: result.append('HEIGHT')
+        if log_format | Q1300ST.LOG_FORMAT_SPEED: result.append('SPEED')
+        if log_format | Q1300ST.LOG_FORMAT_HEADING: result.append('HEADING')
+        if log_format | Q1300ST.LOG_FORMAT_DSTA: result.append('DSTA')
+        if log_format | Q1300ST.LOG_FORMAT_DAGE: result.append('DAGE')
+        if log_format | Q1300ST.LOG_FORMAT_PDOP: result.append('PDOP')
+        if log_format | Q1300ST.LOG_FORMAT_HDOP: result.append('HDOP')
+        if log_format | Q1300ST.LOG_FORMAT_VDOP: result.append('VDOP')
+        if log_format | Q1300ST.LOG_FORMAT_NSAT: result.append('NSAT')
+        if log_format | Q1300ST.LOG_FORMAT_SID: result.append('SID')
+        if log_format | Q1300ST.LOG_FORMAT_ELEVATION: result.append('ELEVATION')
+        if log_format | Q1300ST.LOG_FORMAT_AZIMUTH: result.append('AZIMUTH')
+        if log_format | Q1300ST.LOG_FORMAT_SNR: result.append('SNR')
+        if log_format | Q1300ST.LOG_FORMAT_RCR: result.append('RCR')
+        if log_format | Q1300ST.LOG_FORMAT_MILLISECOND: result.append('MILLISECOND')
+        if log_format | Q1300ST.LOG_FORMAT_DISTANCE: result.append('DISTANCE')
 
-    Use the given device speed.  Looks under DefaultDevicePath.
-    Return None if not found.
-    """
-
-    log.debug('find_devices: speed=%d' % speed)
-    result = []
-
-    for device in glob.glob(QStarz.DefaultPortPrefix):
-#    for device in get_tty_device():
-        if device == '/dev/tty':
-            # don't interrogate the console!
-            continue
-
-        if check_device(device, speed):
-            result.append(device)
-
-    log.debug('find_device: returning: %s' % str(result))
-    return result
-
-
-def get_tty_device():
-    """Guess the logger device.
-
-    Return devices found.
-    """
-
-    devices = glob.glob(DefaultPortPrefix)
-#    devices.reverse()
-    return devices
+        return ','.join(result)
 
 
 def main(argv=None):
     global log
 
     # sort port speeds, lowest to highest, choose slowest
-    QStarz.PortSpeeds.sort()
-    speed = QStarz.PortSpeeds[0]
+    Q1300ST.PortSpeeds.sort()
+    speed = Q1300ST.PortSpeeds[0]
 
     log = log.Log('mtkbabel.log', 10)
     log.critical('main: argv=%s' % str(argv))
 
     # set default values
-    devices = find_devices(speed)
+    devices = Q1300ST.find_devices(speed)
     log.debug('Found devices=%s' % str(devices))
     if len(devices) == 0:
-        log.debug('No QStarz devices found!?')
-        print('No QStarz devices found!?')
+        log.debug('No Q1300ST devices found!?')
+        print('No Q1300ST devices found!?')
     elif len(devices) == 1:
         device = devices[0]
         max_speed = speed
-        for speed in QStarz.PortSpeeds[1:]:
-            if not check_device(device, speed):
+        for speed in Q1300ST.PortSpeeds[1:]:
+            if not Q1300ST.check_device(device, speed):
                 break
             max_speed = speed
-        log.debug('Found device %s, speed=%s' % (str(device), str(max_speed)))
-        print('Found device %s, speed=%s' % (str(device), str(max_speed)))
+        log.debug("Found device '%s', max speed=%s" % (str(device), str(max_speed)))
+        print("Found device '%s', max speed=%s" % (str(device), str(max_speed)))
     else:
         log.debug('Found more than one device: %s' % ', '.join(devices))
         print('Found more than one device: %s' % ', '.join(devices))
+
+    gps = Q1300ST(device, max_speed)
+    gps.init()
+    print('MTK Firmware: Version %s, Release %s, Model ID %s' % (gps.version, gps.release, gps.model_id))
+    print('Log format: %s' % gps.describe_log_format(gps.log_format))
+    print('Recording method on memory full: %s' % gps.describe_recording_method(gps.rec_method))
+    print('Next write address: 0x%04x (%d)' % (gps.next_write_address, gps.next_write_address))
+    print('Number of records: %s (%d)' % (gps.expected_records_total, int(gps.expected_records_total, 16)))
 
 main()
