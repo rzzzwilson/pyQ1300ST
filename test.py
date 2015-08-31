@@ -251,7 +251,7 @@ class Q1300ST(object):
                 checksum = result[-4:-2]
                 log.debug("Q1300ST.read_pkt: pkt='%s', checksum='%s'"
                           % (str(pkt), checksum))
-                if checksum != self.msg_checksum(pkt):
+                if int(checksum, 16) != self.msg_checksum(pkt):
                     log.info('Checksum error on read, got %s expected %s' %
                              (checksum, self.msg_checksum(pkt)))
 #                    raise Exception('Checksum error on read, got %s expected %s' %
@@ -305,7 +305,8 @@ class Q1300ST(object):
         gps = None
         try:
             gps = Q1300ST(device, speed)
-        except serial.SerialError:
+        except serial.SerialException:
+#        except serial.SerialError:
             del gps
             return False
 
