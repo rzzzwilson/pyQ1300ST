@@ -23,6 +23,18 @@ class Q1300ST(object):
     TimeoutPktPreamble = 20 # sec
     TimeoutIdlePort = 500   # msec
 
+    SIZEOF_BYTE = 1
+    SIZEOF_WORD = 2
+    SIZEOF_LONG = 4
+    SIZEOF_FLOAT3 = 3
+    SIZEOF_FLOAT = 4
+    SIZEOF_DOUBLE = 8
+
+    SIZEOF_CHUNK = 0x800
+    SIZEOF_SECTOR = 0x10000
+    SIZEOF_SECTOR_HEADER = 0x200
+    SIZEOF_SEPARATOR = 0x10
+
     LOG_FORMAT_UTC = 0x00000001
     LOG_FORMAT_VALID = 0x00000002
     LOG_FORMAT_LATITUDE = 0x00000004
@@ -151,10 +163,10 @@ class Q1300ST(object):
             bytes_to_read = flash_memory_size(self.model_id)
         else:
             # in STOP mode read from zero to NextWriteAddress
-            sectors = int(self.next_write_address / SIZEOF_SECTOR)
-            if self.next_write_address % SIZEOF_SECTOR:
+            sectors = int(self.next_write_address / self.SIZEOF_SECTOR)
+            if self.next_write_address % self.SIZEOF_SECTOR:
                 sectors += 1
-            bytes_to_read = sectors * SIZEOF_SECTOR
+            bytes_to_read = sectors * self.SIZEOF_SECTOR
 
         log.info('Retrieving %d (0x%08x) bytes of log data from device' % (bytes_to_read, bytes_to_read))
 
@@ -163,12 +175,12 @@ class Q1300ST(object):
         offset = 0
         data = ''
         while offset < bytes_to_read:
-            self.send('PMTK182,7,%08x,%08x' % (offset, SIZEOF_CHUNK))
+            self.send('PMTK182,7,%08x,%08x' % (offset, self.SIZEOF_CHUNK))
             msg = self.recv('PMTK182,8', 10)
             if msg:
                 (address, buff) = msg.split(',')[2:]
                 data += buff
-                offset += SIZEOF_CHUNK
+                offset += self.SIZEOF_CHUNK
             self.recv('PMTK001,182,7,3', 10)
 
         data = data.decode('hex')
@@ -374,5 +386,7 @@ def main(argv=None):
     print('Recording method on memory full: %s' % gps.describe_recording_method(gps.rec_method))
     print('Next write address: 0x%04x (%d)' % (gps.next_write_address, gps.next_write_address))
     print('Number of records: %s (%d)' % (gps.expected_records_total, int(gps.expected_records_total, 16)))
+    mem = gps.get_memory()
+    print('%d bytes of memory read' % len(mem))
 
 main()
