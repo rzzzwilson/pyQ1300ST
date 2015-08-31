@@ -13,105 +13,39 @@ import serial
 import log
 
 
-MaxPortSpeed = 115200
-#MaxPortSpeed = 2400
-DefaultPortPrefix = '/dev/tty*'
-
-Timeout = 0.50          # sec, make bigger if device is slow
-TimeoutPktPreamble = 20 # sec
-#TimeoutIdlePort = 5000  # msec
-TimeoutIdlePort = 500  # msec
-
-LOG_FORMAT_UTC = 0x00000001
-LOG_FORMAT_VALID = 0x00000002
-LOG_FORMAT_LATITUDE = 0x00000004
-LOG_FORMAT_LONGITUDE = 0x00000008
-LOG_FORMAT_HEIGHT = 0x00000010
-LOG_FORMAT_SPEED = 0x00000020
-LOG_FORMAT_HEADING = 0x00000040
-LOG_FORMAT_DSTA = 0x00000080
-LOG_FORMAT_DAGE = 0x00000100
-LOG_FORMAT_PDOP = 0x00000200
-LOG_FORMAT_HDOP = 0x00000400
-LOG_FORMAT_VDOP = 0x00000800
-LOG_FORMAT_NSAT = 0x00001000
-LOG_FORMAT_SID = 0x00002000
-LOG_FORMAT_ELEVATION = 0x00004000
-LOG_FORMAT_AZIMUTH = 0x00008000
-LOG_FORMAT_SNR = 0x00010000
-LOG_FORMAT_RCR = 0x00020000
-LOG_FORMAT_MILLISECOND = 0x00040000
-LOG_FORMAT_DISTANCE = 0x00080000
-
-RCD_METHOD_OVF = 1
-RCD_METHOD_STP = 2
-
-
-def describe_recording_method(method):
-    if method == RCD_METHOD_OVF:
-        return 'OVERLAP'
-    if method == RCD_METHOD_STP:
-        return 'STOP'
-
-def describe_log_format(log_format):
-    result = ''
-
-    if log_format | LOG_FORMAT_UTC: result += ',UTC'
-    if log_format | LOG_FORMAT_VALID: result += ',VALID'
-    if log_format | LOG_FORMAT_LATITUDE: result += ',LATITUDE'
-    if log_format | LOG_FORMAT_LONGITUDE: result += ',LONGITUDE'
-    if log_format | LOG_FORMAT_HEIGHT: result += ',HEIGHT'
-    if log_format | LOG_FORMAT_SPEED: result += ',SPEED'
-    if log_format | LOG_FORMAT_HEADING: result += ',HEADING'
-    if log_format | LOG_FORMAT_DSTA: result += ',DSTA'
-    if log_format | LOG_FORMAT_DAGE: result += ',DAGE'
-    if log_format | LOG_FORMAT_PDOP: result += ',PDOP'
-    if log_format | LOG_FORMAT_HDOP: result += ',HDOP'
-    if log_format | LOG_FORMAT_VDOP: result += ',VDOP'
-    if log_format | LOG_FORMAT_NSAT: result += ',NSAT'
-    if log_format | LOG_FORMAT_SID: result += ',SID'
-    if log_format | LOG_FORMAT_ELEVATION: result += ',ELEVATION'
-    if log_format | LOG_FORMAT_AZIMUTH: result += ',AZIMUTH'
-    if log_format | LOG_FORMAT_SNR: result += ',SNR'
-    if log_format | LOG_FORMAT_RCR: result += ',RCR'
-    if log_format | LOG_FORMAT_MILLISECOND: result += ',MILLISECOND'
-    if log_format | LOG_FORMAT_DISTANCE: result += ',DISTANCE'
-
-    return result[1:]
-
-def send(ser, msg):
-    checksum = msg_checksum(msg)
-    msg = '$%s*%02x\r\n' % (msg, checksum)
-    try:
-        ser.write(msg)
-    except serial.SerialException:
-        log.debug('QStarz.send: failed')
-        return False
-    log.debug('QStarz.send: %s' % msg[:-2])
-    return True
-
-def recv(ser, prefix, timeout=Timeout):
-    """Receive message with given prefix."""
-
-    max_time = time.time() + timeout
-
-    while True:
-        pkt = ser.read_pkt(timeout=timeout)
-        log.debug("QStarz.recv: prefix='%s', pkt='%-40s'" % (prefix, pkt))
-        if pkt.startswith(prefix):
-            log.debug('QStarz.recv: Got desired packet: %s' % prefix)
-            return pkt
-        if time.time() > max_time:
-            log.info('##################### packet_wait: timeout')
-            break
-        time.sleep(0.1)
-
-    return None
-
-
-
 class QStarz(object):
     """Class to handle comms with chip in QStarz logger."""
+
+    DefaultPortPrefix = '/dev/tty*'
+    PortSpeeds = [115200, 38400, 9600, 4800, 1200]
+
+    Timeout = 0.50          # sec, make bigger if device is slow
+    TimeoutPktPreamble = 20 # sec
+    TimeoutIdlePort = 500   # msec
+
+    LOG_FORMAT_UTC = 0x00000001
+    LOG_FORMAT_VALID = 0x00000002
+    LOG_FORMAT_LATITUDE = 0x00000004
+    LOG_FORMAT_LONGITUDE = 0x00000008
+    LOG_FORMAT_HEIGHT = 0x00000010
+    LOG_FORMAT_SPEED = 0x00000020
+    LOG_FORMAT_HEADING = 0x00000040
+    LOG_FORMAT_DSTA = 0x00000080
+    LOG_FORMAT_DAGE = 0x00000100
+    LOG_FORMAT_PDOP = 0x00000200
+    LOG_FORMAT_HDOP = 0x00000400
+    LOG_FORMAT_VDOP = 0x00000800
+    LOG_FORMAT_NSAT = 0x00001000
+    LOG_FORMAT_SID = 0x00002000
+    LOG_FORMAT_ELEVATION = 0x00004000
+    LOG_FORMAT_AZIMUTH = 0x00008000
+    LOG_FORMAT_SNR = 0x00010000
+    LOG_FORMAT_RCR = 0x00020000
+    LOG_FORMAT_MILLISECOND = 0x00040000
+    LOG_FORMAT_DISTANCE = 0x00080000
+
+    RCD_METHOD_OVF = 1
+    RCD_METHOD_STP = 2
 
     def __init__(self, device, speed):
         """Initialize the device.
@@ -150,7 +84,7 @@ class QStarz(object):
             self.sane = False
             return
 
-        log.debug('device %s is a QStarz device, created' % device)
+        log.debug('device %s is a QStarz device' % device)
         self.sane = True
 
     def init(self):
@@ -202,8 +136,6 @@ class QStarz(object):
 
     def __del__(self):
         if hasattr(self, 'serial'):
-#        if self.serial:
-            log('__del__: self.serial=%s' % str(self.serial))
             del self.serial
 
     def read_memory(self):
@@ -214,7 +146,7 @@ class QStarz(object):
             return
 
         # read data
-        if self.rec_method == RCD_METHOD_OVF:
+        if self.rec_method == self.RCD_METHOD_OVF:
             # in OVERLAP mode we don't know where data ends, read it all
             bytes_to_read = flash_memory_size(self.model_id)
         else:
@@ -330,6 +262,89 @@ class QStarz(object):
             result ^= ord(ch)
         return result
 
+def describe_recording_method(method):
+    if method == self.RCD_METHOD_OVF:
+        return 'OVERLAP'
+    if method == self.RCD_METHOD_STP:
+        return 'STOP'
+
+
+def describe_log_format(log_format):
+    result = []
+
+    if log_format | self.LOG_FORMAT_UTC: result.append('UTC')
+    if log_format | self.LOG_FORMAT_VALID: result.append('VALID')
+    if log_format | self.LOG_FORMAT_LATITUDE: result.append('LATITUDE')
+    if log_format | self.LOG_FORMAT_LONGITUDE: result.append('LONGITUDE')
+    if log_format | self.LOG_FORMAT_HEIGHT: result.append('HEIGHT')
+    if log_format | self.LOG_FORMAT_SPEED: result.append('SPEED')
+    if log_format | self.LOG_FORMAT_HEADING: result.append('HEADING')
+    if log_format | self.LOG_FORMAT_DSTA: result.append('DSTA')
+    if log_format | self.LOG_FORMAT_DAGE: result.append('DAGE')
+    if log_format | self.LOG_FORMAT_PDOP: result.append('PDOP')
+    if log_format | self.LOG_FORMAT_HDOP: result.append('HDOP')
+    if log_format | self.LOG_FORMAT_VDOP: result.append('VDOP')
+    if log_format | self.LOG_FORMAT_NSAT: result.append('NSAT')
+    if log_format | self.LOG_FORMAT_SID: result.append('SID')
+    if log_format | self.LOG_FORMAT_ELEVATION: result.append('ELEVATION')
+    if log_format | self.LOG_FORMAT_AZIMUTH: result.append('AZIMUTH')
+    if log_format | self.LOG_FORMAT_SNR: result.append('SNR')
+    if log_format | self.LOG_FORMAT_RCR: result.append('RCR')
+    if log_format | self.LOG_FORMAT_MILLISECOND: result.append('MILLISECOND')
+    if log_format | self.LOG_FORMAT_DISTANCE: result.append('DISTANCE')
+
+    return ','.join(result)
+
+
+def send(ser, msg):
+    checksum = msg_checksum(msg)
+    msg = '$%s*%02x\r\n' % (msg, checksum)
+    try:
+        ser.write(msg)
+    except serial.SerialException:
+        log.debug('QStarz.send: failed')
+        return False
+    log.debug('QStarz.send: %s' % msg[:-2])
+    return True
+
+
+def recv(ser, prefix, timeout=QStarz.Timeout):
+    """Receive message with given prefix."""
+
+    max_time = time.time() + timeout
+
+    while True:
+        pkt = ser.read_pkt(timeout=timeout)
+        log.debug("QStarz.recv: prefix='%s', pkt='%-40s'" % (prefix, pkt))
+        if pkt.startswith(prefix):
+            log.debug('QStarz.recv: Got desired packet: %s' % prefix)
+            return pkt
+        if time.time() > max_time:
+            log.info('##################### packet_wait: timeout')
+            break
+        time.sleep(0.1)
+
+    return None
+
+
+def check_device(device, speed):
+    """Check given device at given speed."""
+
+    log.debug('check_device: checking device %s at speed %d' % (device, speed))
+
+    gps = None
+    try:
+        gps = QStarz(device, speed)
+    except serial.SerialError:
+        del gps
+        return False
+
+    if gps and gps.sane:
+        del gps
+        return True
+
+    return False
+
 def find_devices(speed):
     """Find the QStarz devices amongst /dev/*.
 
@@ -337,25 +352,17 @@ def find_devices(speed):
     Return None if not found.
     """
 
-    log.debug('find_device: speed=%d' % speed)
+    log.debug('find_devices: speed=%d' % speed)
     result = []
 
-    for device in get_tty_device():
+    for device in glob.glob(QStarz.DefaultPortPrefix):
+#    for device in get_tty_device():
         if device == '/dev/tty':
             # don't interrogate the console!
             continue
 
-        log.debug('find_device: checking device %s' % device)
-        gps = None
-        try:
-            gps = QStarz(device, speed)
-        except serial.SerialError:
-            del gps
-
-        if gps and gps.sane:
-            log.debug('find_device: adding device %s' % device)
+        if check_device(device, speed):
             result.append(device)
-            del gps
 
     log.debug('find_device: returning: %s' % str(result))
     return result
@@ -369,108 +376,36 @@ def get_tty_device():
 
     devices = glob.glob(DefaultPortPrefix)
 #    devices.reverse()
-    log.debug('get_tty_port() returns:\n%s' % str(devices))
     return devices
 
 
-def read_memory(port, speed):
-    """Read memory data.
-
-    port   the port to read
-    speed  speed of the port
-    """
-
-    ser = serial.Serial(port=port, baudrate=speed, timeout=0)
-    packet_send(ser, 'PMTK000')
-    ret = packet_wait(ser, 'PMTK001,0,')
-    if not ret.startswith('PMTK001,0,'):
-        raise Exception('MTK Test command failed')
-    packet_send(ser, 'PMTK604')
-    ret = packet_wait(ser, 'PMTK001,604,')
-    version = ret.split(',')[2]
-
-    packet_send(ser, 'PMTK605')
-    ret = packet_wait(ser, 'PMTK705,')
-    ret_list = ret.split(',')
-    release = ret_list[1]
-    model_id = ret_list[2]
-
-    print('MTK Firmware: Version %s, Release %s, Model ID %s' % (version, release, model_id))
-
-    # query log format
-    packet_send(ser, 'PMTK182,2,2')
-    ret = packet_wait(ser, 'PMTK182,3,2,')
-    fmt = ret.split(',')[3]
-    log_format = int(fmt, 16)
-    print('Log format: (%s) %s' % (fmt, describe_log_format(log_format)))
-
-    packet_send(ser, 'PMTK182,2,6')
-    packet_wait(ser, 'PMTK001,182,2,3')
-    method = packet_wait(ser, 'PMTK182,3,6,')
-    rec_method = int(method.split(',')[3])
-    print('Recording method on memory full: (%d) %s' % (rec_method, describe_recording_method(rec_method)))
-
-    # query RCD_ADDR data
-    packet_send(ser, 'PMTK182,2,8')
-    ret = packet_wait(ser, 'PMTK182,3,8')
-    packet_wait(ser, 'PMTK001,182,2,3')
-    if ret:
-        next_write_address = int(ret.split(',')[3], 16)
-        print('Next write address: 0x%04x (%d)' % (next_write_address, next_write_address))
-
-    # query number of records written
-    packet_send(ser, 'PMTK182,2,10')
-    ret = packet_wait(ser, 'PMTK182,3,10')
-    packet_wait(ser, 'PMTK001,182,2,3')
-    if ret:
-        expected_records_total = ret.split(',')[3]
-        print('Number of records: %s (%d)' % (expected_records_total, int(expected_records_total, 16)))
-
-    # read data
-    if rec_method == RCD_METHOD_OVF:
-        # in OVERLAP mode we don't know where data ends, read it all
-        bytes_to_read = flash_memory_size(model_id)
-    else:
-        # in STOP mode read from zero to NextWriteAddress
-        sectors = int(next_write_address / SIZEOF_SECTOR)
-        if next_write_address % SIZEOF_SECTOR:
-            sectors += 1
-        bytes_to_read = sectors * SIZEOF_SECTOR
-
-    print('Retrieving %d (0x%08x) bytes of log data from device' % (bytes_to_read, bytes_to_read))
-
-    non_written_sector_found = False
-
-    offset = 0
-    data = ''
-    while offset < bytes_to_read:
-        packet_send(ser, 'PMTK182,7,%08x,%08x' % (offset, SIZEOF_CHUNK))
-        msg = packet_wait(ser, 'PMTK182,8', 10)
-        if msg:
-            (address, buff) = msg.split(',')[2:]
-            data += buff
-            offset += SIZEOF_CHUNK
-        packet_wait(ser, 'PMTK001,182,7,3', 10)
-
-    data = data.decode('hex')
-    print('%d bytes read (expected %d), len(data)=%d' % (offset, bytes_to_read, len(data)))
-
-    return data
-
 def main(argv=None):
     global log
+
+    # sort port speeds, lowest to highest, choose slowest
+    QStarz.PortSpeeds.sort()
+    speed = QStarz.PortSpeeds[0]
+
     log = log.Log('mtkbabel.log', 10)
     log.critical('main: argv=%s' % str(argv))
 
     # set default values
-    speed = MaxPortSpeed
     devices = find_devices(speed)
     log.debug('Found devices=%s' % str(devices))
     if len(devices) == 0:
+        log.debug('No QStarz devices found!?')
         print('No QStarz devices found!?')
     elif len(devices) == 1:
-        print('Found device %s' % str(devices[0]))
+        device = devices[0]
+        max_speed = speed
+        for speed in QStarz.PortSpeeds[1:]:
+            if not check_device(device, speed):
+                break
+            max_speed = speed
+        log.debug('Found device %s, speed=%s' % (str(device), str(max_speed)))
+        print('Found device %s, speed=%s' % (str(device), str(max_speed)))
     else:
+        log.debug('Found more than one device: %s' % ', '.join(devices))
         print('Found more than one device: %s' % ', '.join(devices))
 
 main()
