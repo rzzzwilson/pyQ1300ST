@@ -17,9 +17,10 @@ MaxPortSpeed = 115200
 #MaxPortSpeed = 2400
 DefaultPortPrefix = '/dev/tty*'
 
-Timeout = 5             # sec
+Timeout = 0.50          # sec, make bigger if device is slow
 TimeoutPktPreamble = 20 # sec
-TimeoutIdlePort = 5000  # msec
+#TimeoutIdlePort = 5000  # msec
+TimeoutIdlePort = 500  # msec
 
 LOG_FORMAT_UTC = 0x00000001
 LOG_FORMAT_VALID = 0x00000002
@@ -150,6 +151,7 @@ class QStarz(object):
             return
 
         log.debug('device %s is a QStarz device, created' % device)
+        self.sane = True
 
     def init(self):
         if not self.sane:
@@ -198,9 +200,11 @@ class QStarz(object):
 
         return True
 
-#    def __del__(self):
+    def __del__(self):
+        if hasattr(self, 'serial'):
 #        if self.serial:
-#            del self.serial
+            log('__del__: self.serial=%s' % str(self.serial))
+            del self.serial
 
     def read_memory(self):
         """Read device memory."""
@@ -231,7 +235,6 @@ class QStarz(object):
             msg = self.recv('PMTK182,8', 10)
             if msg:
                 (address, buff) = msg.split(',')[2:]
-                #print('len=%d, buff=%s' % (len(buff), buff))
                 data += buff
                 offset += SIZEOF_CHUNK
             self.recv('PMTK001,182,7,3', 10)
@@ -270,7 +273,6 @@ class QStarz(object):
     
         while True:
             pkt = self.read_pkt(timeout=timeout)
-            log.debug("QStarz.recv: prefix='%s', pkt='%-40s'" % (prefix, pkt))
             if pkt.startswith(prefix):
                 log.debug('QStarz.recv: Got desired packet: %s' % prefix)
                 return pkt
@@ -299,13 +301,12 @@ class QStarz(object):
                 # get complete response
                 result = self.read_buffer[:self.read_buffer.index('\n')+1]
                 self.read_buffer = self.read_buffer[self.read_buffer.index('\n')+1:]
-                log.debug('result=%s' % str(result))
 
                 # get packet, check checksum
                 pkt = result[1:-5]
-                log.debug('pkt=%s' % str(pkt))
                 checksum = result[-4:-2]
-                log.debug("QStarz.read_pkt: pkt='%s', checksum='%s'" % (pkt, checksum))
+                log.debug("QStarz.read_pkt: pkt='%s', checksum='%s'"
+                          % (str(pkt), checksum))
                 if checksum != self.msg_checksum(pkt):
                     log.info('Checksum error on read, got %s expected %s' %
                              (checksum, self.msg_checksum(pkt)))
@@ -316,12 +317,9 @@ class QStarz(object):
                 data = self.serial.read(9999)
             except serial.SerialException:
                 return pkt
-            log.debug('read_pkt: read data=%s' % str(data))
             if len(data) > 0:
                 self.read_buffer += data
-                log.debug('read_pkt: appended to buffer=%s' % str(data))
             else:
-                log.debug('read_pkt: sleeping')
                 time.sleep(0.1)
 
         return pkt
@@ -330,29 +328,37 @@ class QStarz(object):
         result = 0
         for ch in msg:
             result ^= ord(ch)
-        log.debug("msg='%s', checksum=0x%02x" % (msg, result))
         return result
 
-def find_device(speed):
-    """Find the device amongst /dev/*.
+def find_devices(speed):
+    """Find the QStarz devices amongst /dev/*.
 
     Use the given device speed.  Looks under DefaultDevicePath.
     Return None if not found.
     """
 
     log.debug('find_device: speed=%d' % speed)
+    result = []
+
     for device in get_tty_device():
+        if device == '/dev/tty':
+            # don't interrogate the console!
+            continue
+
         log.debug('find_device: checking device %s' % device)
+        gps = None
         try:
             gps = QStarz(device, speed)
         except serial.SerialError:
-            print('serial.SerialError')
-        log.debug('find_device: returning device %s' % device)
-        del gps
-        return device
+            del gps
 
-    log.debug('find_device: No device found')
-    return None
+        if gps and gps.sane:
+            log.debug('find_device: adding device %s' % device)
+            result.append(device)
+            del gps
+
+    log.debug('find_device: returning: %s' % str(result))
+    return result
 
 
 def get_tty_device():
@@ -362,7 +368,7 @@ def get_tty_device():
     """
 
     devices = glob.glob(DefaultPortPrefix)
-    devices.reverse()
+#    devices.reverse()
     log.debug('get_tty_port() returns:\n%s' % str(devices))
     return devices
 
@@ -442,7 +448,6 @@ def read_memory(port, speed):
         msg = packet_wait(ser, 'PMTK182,8', 10)
         if msg:
             (address, buff) = msg.split(',')[2:]
-#            print('len=%d, buff=%s' % (len(buff), buff))
             data += buff
             offset += SIZEOF_CHUNK
         packet_wait(ser, 'PMTK001,182,7,3', 10)
@@ -459,8 +464,13 @@ def main(argv=None):
 
     # set default values
     speed = MaxPortSpeed
-    port = find_device(speed)
-    log.debug('port=%s, speed=%s' % (str(port), str(speed)))
-    print('port=%s, speed=%s' % (str(port), str(speed)))
+    devices = find_devices(speed)
+    log.debug('Found devices=%s' % str(devices))
+    if len(devices) == 0:
+        print('No QStarz devices found!?')
+    elif len(devices) == 1:
+        print('Found device %s' % str(devices[0]))
+    else:
+        print('Found more than one device: %s' % ', '.join(devices))
 
 main()
