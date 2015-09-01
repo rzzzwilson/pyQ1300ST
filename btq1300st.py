@@ -9,6 +9,7 @@ import sys
 import glob
 import time
 import serial
+import binascii
 
 import log
 
@@ -71,7 +72,7 @@ class BTQ1300ST(object):
 
         self.memory = None
         self.read_buffer = ''
-        self.sane = True
+        self.sane = False
 
         if device is None:
             log.debug('QStartz object must be given a valid port, not None')
@@ -80,23 +81,19 @@ class BTQ1300ST(object):
             self.serial = serial.Serial(port=device, baudrate=speed, timeout=0)
         except OSError:
             log.debug('device %s is not sane' % device)
-            self.sane = False
             return
         except serial.SerialException:
             log.debug('device %s is not readable' % device)
-            self.sane = False
             return
 
         if not self.send('PMTK000'):
             log.debug('device %s is not sane' % device)
-            self.sane = False
             return
         log.debug('****** device %s IS sane' % device)
 
         ret = self.recv('PMTK001,0,')
         if not ret or not ret.startswith('PMTK001,0,'):
             log.debug('device %s is not a BT-Q1300ST device' % device)
-            self.sane = False
             return
 
         log.debug('device %s is a BT-Q1300ST device' % device)
@@ -327,6 +324,8 @@ class BTQ1300ST(object):
 
     @staticmethod
     def describe_log_format(log_format):
+        """Return a string describing the log format."""
+
         result = []
 
         if log_format | BTQ1300ST.LOG_FORMAT_UTC: result.append('UTC')
@@ -351,6 +350,142 @@ class BTQ1300ST(object):
         if log_format | BTQ1300ST.LOG_FORMAT_DISTANCE: result.append('DISTANCE')
 
         return ','.join(result)
+
+    @staticmethod
+    def describe_log_status(log_status):
+        """Return a string describing the log attributes."""
+
+        result = []
+
+        if log_status & LOG_STATUS_AUTOLOG:
+            result.append('AUTOLOG_ON')
+        else:
+            result.append('AUTOLOG_OFF')
+
+        if log_status & LOG_STATUS_STOP_WHEN_FULL:
+            result.append('STOP_WHEN_FULL')
+        else:
+            result.append('OVERLAP_WHEN_FULL')
+
+        if log_status & LOG_STATUS_ENABLE:
+            result.append('ENABLE_LOG')
+
+        if log_status & LOG_STATUS_DISABLE:
+            result.append('DISABLE_LOG')
+
+        if log_status & LOG_STATUS_NEED_FORMAT:
+            result.append('NEED_LOG')
+
+        if log_status & LOG_STATUS_FULL:
+            result.append('FULL')
+
+        return ','.join(result)
+
+    @staticmethod
+    def parse_sector_header(sector_header):
+        """Parse a log sector header."""
+
+        log.debug('sector_header=%s' % binascii.b2a_hex(sector_header))
+
+        separator = sector_header[-6]
+        checksum = sector_header[-5]
+        header_tail = binascii.b2a_hex(sector_header[-4:])
+        if separator != '*' or header_tail != 'bbbbbbbb':
+            log('ERROR: Invalid sector header, see above')
+            sys.exit(1)
+
+        offset = 0
+        log_count = sector_header[offset:BTQ1300ST.SIZEOF_WORD]
+        offset += BTQ1300ST.SIZEOF_WORD
+        log_format = sector_header[offset:offset+BTQ1300ST.SIZEOF_LONG]
+        offset += BTQ1300ST.SIZEOF_LONG
+        log_status = sector_header[offset:offset+BTQ1300ST.SIZEOF_WORD]
+        offset += BTQ1300ST.SIZEOF_WORD
+        log_period = sector_header[offset:offset+BTQ1300ST.SIZEOF_LONG]
+        offset += BTQ1300ST.SIZEOF_LONG
+        log_distance = sector_header[offset:offset+BTQ1300ST.SIZEOF_LONG]
+        offset += BTQ1300ST.SIZEOF_LONG
+        log_speed = sector_header[offset:offset+BTQ1300ST.SIZEOF_LONG]
+        offset += BTQ1300ST.SIZEOF_LONG
+        log_failsect = sector_header[offset:offset+BTQ1300ST.SIZEOF_BYTE*32]
+
+        log.debug('log_count=%s' % binascii.b2a_hex(log_count))
+        log.debug('log_format=%s' % binascii.b2a_hex(log_format))
+        log.debug('log_status=%s' % binascii.b2a_hex(log_status))
+        log.debug('log_period=%s' % binascii.b2a_hex(log_period))
+        log.debug('log_distance=%s' % binascii.b2a_hex(log_distance))
+        log.debug('log_speed=%s' % binascii.b2a_hex(log_speed))
+        log.debug('log_failsect=%s' % binascii.b2a_hex(log_failsect))
+
+        log.debug('len(log_count)=%d' % len(log_count))
+        log.debug('len(log_format)=%d' % len(log_format))
+
+        log_count = BTQ1300ST.unpack(log_count)
+        log_format = BTQ1300ST.unpack(log_format)
+
+        log.debug('log_count=%s' % str(log_count))
+        log.debug('log_format=%s' % str(log_format))
+
+        return (log_count, log_format)
+
+    @staticmethod
+    def parse_log_data(data):
+        """Parse log data.
+
+        data  bytearray of log data
+        """
+
+        fp = 0
+        size = len(data)
+        record_count_total = 0
+
+        while True:
+            log.debug('>> Reading offset %08x' % fp)
+
+            if (fp % BTQ1300ST.SIZEOF_SECTOR) == 0:
+                # reached the beginning of a log sector (every 0x10000 bytes),
+                # get header (0x200 bytes)
+                header = data[fp:fp + BTQ1300ST.SIZEOF_SECTOR_HEADER]
+                (expected_records_sector, log_format) = BTQ1300ST.parse_sector_header(header)
+                log.debug('expected_records_sector=%04x' % expected_records_sector)
+                log.debug('log_format=%08x' % log_format)
+
+                record_count_sector = 0
+
+            if record_count_total >= expected_records_total:
+                log.debug('Total record count: %d' % record_count_total)
+                break
+
+            if record_count_sector >= expected_records_sector:
+                new_offset = BTQ1300ST.SIZEOF_SECTOR * (fp/BTQ1300ST.SIZEOF_SECTOR + 1)
+                if new_offset < log_len:
+                    fp = new_offset
+                    continue
+                else:
+                    # end of file
+                    pass
+                    log.debug('Total record count: %d' % record_count_total)
+                break
+
+    @staticmethod
+    def unpack(byte_array):
+        """Unpack byte array into binary (LSB first)."""
+
+        log.debug("unpack: byte_array='%s'" % str(byte_array))
+        log.debug('unpack: type(byte_array)=%s' % type(byte_array))
+        for (i, v) in enumerate(byte_array):
+            log.debug("%d: %d" % (i, ord(v)))
+
+        result = 0
+        for val in reversed(byte_array):
+            log.debug('before: result=%s, val=%s' % (str(result), str(val)))
+            result = result*256 + ord(val)
+
+        return result
+
+
+
+
 
 
 if __name__ == '__main__':
@@ -391,3 +526,4 @@ if __name__ == '__main__':
     print('Number of records: %s (%d)' % (gps.expected_records_total, int(gps.expected_records_total, 16)))
     mem = gps.get_memory()
     print('%d bytes of memory read' % len(mem))
+    gps.parse_log_data(mem)
