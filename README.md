@@ -19,3 +19,5 @@ walk around my area.
 NOTE: the original development of this was done on OSX.  Unfortunately, since
 Yosemite (10.10) the QStarz BT-Q1300ST device isn't mounted under OSX.  Development
 was switched to Linux (XUbuntu) at that point.
+
+NOTE: Product web page: http://www.qstarz.com/Products/GPS%20Products/BT-Q1300ST-F.htm
