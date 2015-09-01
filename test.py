@@ -18,6 +18,7 @@ class Q1300ST(object):
 
     DefaultDevicePath = '/dev/tty*'
     PortSpeeds = [115200, 38400, 9600, 4800, 1200]
+    PortSpeeds.sort()
 
     Timeout = 0.50          # sec, make bigger if device is slow
     TimeoutPktPreamble = 20 # sec
@@ -354,22 +355,22 @@ class Q1300ST(object):
 def main(argv=None):
     global log
 
-    # sort port speeds, lowest to highest, choose slowest
-    Q1300ST.PortSpeeds.sort()
-    speed = Q1300ST.PortSpeeds[0]
+    # port speeds are sorted lowest to fastest, choose slowest
+    test_speed = Q1300ST.PortSpeeds[0]
 
     log = log.Log('mtkbabel.log', 10)
     log.critical('main: argv=%s' % str(argv))
 
     # set default values
-    devices = Q1300ST.find_devices(speed)
+    devices = Q1300ST.find_devices(test_speed)
     log.debug('Found devices=%s' % str(devices))
     if len(devices) == 0:
         log.debug('No Q1300ST devices found!?')
         print('No Q1300ST devices found!?')
+        return
     elif len(devices) == 1:
         device = devices[0]
-        max_speed = speed
+        max_speed = test_speed
         for speed in Q1300ST.PortSpeeds[1:]:
             if not Q1300ST.check_device(device, speed):
                 break
@@ -379,6 +380,7 @@ def main(argv=None):
     else:
         log.debug('Found more than one device: %s' % ', '.join(devices))
         print('Found more than one device: %s' % ', '.join(devices))
+        return
 
     gps = Q1300ST(device, max_speed)
     gps.init()
