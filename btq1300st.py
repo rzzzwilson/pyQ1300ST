@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Test program: find the GPS device.
+Class encapsulating the QStarz BT-Q1300ST logger handling.
 """
 
 import sys
@@ -16,7 +16,9 @@ import log
 class BTQ1300ST(object):
     """Class to handle comms with chip in QStarz BT-Q1300ST logger."""
 
+    # this may need to be OS dependant
     DefaultDevicePath = '/dev/tty*'
+
     PortSpeeds = [115200, 38400, 9600, 4800, 1200]
     PortSpeeds.sort()
 
@@ -93,11 +95,11 @@ class BTQ1300ST(object):
 
         ret = self.recv('PMTK001,0,')
         if not ret or not ret.startswith('PMTK001,0,'):
-            log.debug('device %s is not a BTQ1300ST device' % device)
+            log.debug('device %s is not a BT-Q1300ST device' % device)
             self.sane = False
             return
 
-        log.debug('device %s is a BTQ1300ST device' % device)
+        log.debug('device %s is a BT-Q1300ST device' % device)
         self.sane = True
 
     def init(self):
@@ -148,7 +150,7 @@ class BTQ1300ST(object):
         return True
 
     def __del__(self):
-        if hasattr(self, 'serial'):
+        if self.sane and hasattr(self, 'serial') and self.serial:
             del self.serial
 
     def read_memory(self):
@@ -201,7 +203,7 @@ class BTQ1300ST(object):
         self.memory = memory
 
     def send(self, msg):
-        checksum = self.msg_checksum(msg)
+        checksum = self.calc_checksum(msg)
         msg = '$%s*%02x\r\n' % (msg, checksum)
         try:
             self.serial.write(msg)
@@ -252,9 +254,9 @@ class BTQ1300ST(object):
                 checksum = result[-4:-2]
                 log.debug("BTQ1300ST.read_pkt: pkt='%s', checksum='%s'"
                           % (str(pkt), checksum))
-                if int(checksum, 16) != self.msg_checksum(pkt):
+                if int(checksum, 16) != self.calc_checksum(pkt):
                     log.info('Checksum error on read, got %s expected %s' %
-                             (checksum, self.msg_checksum(pkt)))
+                             (checksum, self.calc_checksum(pkt)))
 #                    raise Exception('Checksum error on read, got %s expected %s' %
 #                                    (checksum, packet_checksum(pkt)))
                 return pkt
@@ -265,11 +267,11 @@ class BTQ1300ST(object):
             if len(data) > 0:
                 self.read_buffer += data
             else:
-                time.sleep(0.1)
+                time.sleep(0.05)
 
         return pkt
 
-    def msg_checksum(self, msg):
+    def calc_checksum(self, msg):
         result = 0
         for ch in msg:
             result ^= ord(ch)
@@ -277,7 +279,7 @@ class BTQ1300ST(object):
 
     @staticmethod
     def find_devices(speed):
-        """Find any BTQ1300ST devices.
+        """Find any BT-Q1300ST devices.
 
         Use the given device speed.  Looks under DefaultDevicePath.
         Return a list of found devices, [] if not found.
@@ -307,7 +309,6 @@ class BTQ1300ST(object):
         try:
             gps = BTQ1300ST(device, speed)
         except serial.SerialException:
-#        except serial.SerialError:
             del gps
             return False
 
@@ -352,22 +353,21 @@ class BTQ1300ST(object):
         return ','.join(result)
 
 
-def main(argv=None):
+if __name__ == '__main__':
     global log
 
     # port speeds are sorted lowest to fastest, choose slowest
     test_speed = BTQ1300ST.PortSpeeds[0]
 
     log = log.Log('mtkbabel.log', 10)
-    log.critical('main: argv=%s' % str(argv))
 
     # set default values
     devices = BTQ1300ST.find_devices(test_speed)
     log.debug('Found devices=%s' % str(devices))
     if len(devices) == 0:
-        log.debug('No BTQ1300ST devices found!?')
-        print('No BTQ1300ST devices found!?')
-        return
+        log.debug('No BT-Q1300ST devices found!?')
+        print('No BT-Q1300ST devices found!?')
+        sys.exit()
     elif len(devices) == 1:
         device = devices[0]
         max_speed = test_speed
@@ -380,7 +380,7 @@ def main(argv=None):
     else:
         log.debug('Found more than one device: %s' % ', '.join(devices))
         print('Found more than one device: %s' % ', '.join(devices))
-        return
+        sys.exit()
 
     gps = BTQ1300ST(device, max_speed)
     gps.init()
@@ -391,5 +391,3 @@ def main(argv=None):
     print('Number of records: %s (%d)' % (gps.expected_records_total, int(gps.expected_records_total, 16)))
     mem = gps.get_memory()
     print('%d bytes of memory read' % len(mem))
-
-main()
