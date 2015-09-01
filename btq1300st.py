@@ -13,7 +13,7 @@ import serial
 import log
 
 
-class Q1300ST(object):
+class BTQ1300ST(object):
     """Class to handle comms with chip in QStarz BT-Q1300ST logger."""
 
     DefaultDevicePath = '/dev/tty*'
@@ -93,11 +93,11 @@ class Q1300ST(object):
 
         ret = self.recv('PMTK001,0,')
         if not ret or not ret.startswith('PMTK001,0,'):
-            log.debug('device %s is not a Q1300ST device' % device)
+            log.debug('device %s is not a BTQ1300ST device' % device)
             self.sane = False
             return
 
-        log.debug('device %s is a Q1300ST device' % device)
+        log.debug('device %s is a BTQ1300ST device' % device)
         self.sane = True
 
     def init(self):
@@ -114,20 +114,20 @@ class Q1300ST(object):
         self.release = ret_list[1]
         self.model_id = ret_list[2]
 
-        log.info('Q1300ST: ******** MTK Firmware: Version %s, Release %s, Model ID %s' % (self.version, self.release, self.model_id))
+        log.info('BTQ1300ST: ******** MTK Firmware: Version %s, Release %s, Model ID %s' % (self.version, self.release, self.model_id))
 
         # query log format
         self.send('PMTK182,2,2')
         ret = self.recv('PMTK182,3,2,')
         fmt = ret.split(',')[3]
         self.log_format = int(fmt, 16)
-        log.info('Q1300ST: ******** Log format: %s' % self.describe_log_format(self.log_format))
+        log.info('BTQ1300ST: ******** Log format: %s' % self.describe_log_format(self.log_format))
 
         self.send('PMTK182,2,6')
         self.recv('PMTK001,182,2,3')
         method = self.recv('PMTK182,3,6,')
         self.rec_method = int(method.split(',')[3])
-        log.info('Q1300ST: ******** Recording method on memory full: %s' % self.describe_recording_method(self.rec_method))
+        log.info('BTQ1300ST: ******** Recording method on memory full: %s' % self.describe_recording_method(self.rec_method))
 
         # query RCD_ADDR data
         self.send('PMTK182,2,8')
@@ -135,7 +135,7 @@ class Q1300ST(object):
         self.recv('PMTK001,182,2,3')
         if ret:
             self.next_write_address = int(ret.split(',')[3], 16)
-            log.info('Q1300ST: ******** Next write address: 0x%04x (%d)' % (self.next_write_address, self.next_write_address))
+            log.info('BTQ1300ST: ******** Next write address: 0x%04x (%d)' % (self.next_write_address, self.next_write_address))
 
         # query number of records written
         self.send('PMTK182,2,10')
@@ -143,7 +143,7 @@ class Q1300ST(object):
         self.send('PMTK001,182,2,3')
         if ret:
             self.expected_records_total = ret.split(',')[3]
-            log.info('Q1300ST: ******** Number of records: %s (%d)' % (self.expected_records_total, int(self.expected_records_total, 16)))
+            log.info('BTQ1300ST: ******** Number of records: %s (%d)' % (self.expected_records_total, int(self.expected_records_total, 16)))
 
         return True
 
@@ -206,9 +206,9 @@ class Q1300ST(object):
         try:
             self.serial.write(msg)
         except serial.SerialException:
-            log.debug('Q1300ST.send: failed')
+            log.debug('BTQ1300ST.send: failed')
             return False
-        log.debug('Q1300ST.send: %s' % msg[:-2])
+        log.debug('BTQ1300ST.send: %s' % msg[:-2])
         return True
 
     def recv(self, prefix, timeout=Timeout):
@@ -219,7 +219,7 @@ class Q1300ST(object):
         while True:
             pkt = self.read_pkt(timeout=timeout)
             if pkt.startswith(prefix):
-                log.debug('Q1300ST.recv: Got desired packet: %s' % prefix)
+                log.debug('BTQ1300ST.recv: Got desired packet: %s' % prefix)
                 return pkt
             if time.time() > max_time:
                 log.info('##################### packet_wait: timeout')
@@ -250,7 +250,7 @@ class Q1300ST(object):
                 # get packet, check checksum
                 pkt = result[1:-5]
                 checksum = result[-4:-2]
-                log.debug("Q1300ST.read_pkt: pkt='%s', checksum='%s'"
+                log.debug("BTQ1300ST.read_pkt: pkt='%s', checksum='%s'"
                           % (str(pkt), checksum))
                 if int(checksum, 16) != self.msg_checksum(pkt):
                     log.info('Checksum error on read, got %s expected %s' %
@@ -277,7 +277,7 @@ class Q1300ST(object):
 
     @staticmethod
     def find_devices(speed):
-        """Find any Q1300ST devices.
+        """Find any BTQ1300ST devices.
 
         Use the given device speed.  Looks under DefaultDevicePath.
         Return a list of found devices, [] if not found.
@@ -286,12 +286,12 @@ class Q1300ST(object):
         log.debug('find_devices: speed=%d' % speed)
         result = []
 
-        for device in glob.glob(Q1300ST.DefaultDevicePath):
+        for device in glob.glob(BTQ1300ST.DefaultDevicePath):
             if device == '/dev/tty':
                 # don't interrogate the console!
                 continue
 
-            if Q1300ST.check_device(device, speed):
+            if BTQ1300ST.check_device(device, speed):
                 result.append(device)
 
         log.debug('find_device: returning: %s' % str(result))
@@ -305,7 +305,7 @@ class Q1300ST(object):
 
         gps = None
         try:
-            gps = Q1300ST(device, speed)
+            gps = BTQ1300ST(device, speed)
         except serial.SerialException:
 #        except serial.SerialError:
             del gps
@@ -319,35 +319,35 @@ class Q1300ST(object):
 
     @staticmethod
     def describe_recording_method(method):
-        if method == Q1300ST.RCD_METHOD_OVF:
+        if method == BTQ1300ST.RCD_METHOD_OVF:
             return 'OVERLAP'
-        if method == Q1300ST.RCD_METHOD_STP:
+        if method == BTQ1300ST.RCD_METHOD_STP:
             return 'STOP'
 
     @staticmethod
     def describe_log_format(log_format):
         result = []
 
-        if log_format | Q1300ST.LOG_FORMAT_UTC: result.append('UTC')
-        if log_format | Q1300ST.LOG_FORMAT_VALID: result.append('VALID')
-        if log_format | Q1300ST.LOG_FORMAT_LATITUDE: result.append('LATITUDE')
-        if log_format | Q1300ST.LOG_FORMAT_LONGITUDE: result.append('LONGITUDE')
-        if log_format | Q1300ST.LOG_FORMAT_HEIGHT: result.append('HEIGHT')
-        if log_format | Q1300ST.LOG_FORMAT_SPEED: result.append('SPEED')
-        if log_format | Q1300ST.LOG_FORMAT_HEADING: result.append('HEADING')
-        if log_format | Q1300ST.LOG_FORMAT_DSTA: result.append('DSTA')
-        if log_format | Q1300ST.LOG_FORMAT_DAGE: result.append('DAGE')
-        if log_format | Q1300ST.LOG_FORMAT_PDOP: result.append('PDOP')
-        if log_format | Q1300ST.LOG_FORMAT_HDOP: result.append('HDOP')
-        if log_format | Q1300ST.LOG_FORMAT_VDOP: result.append('VDOP')
-        if log_format | Q1300ST.LOG_FORMAT_NSAT: result.append('NSAT')
-        if log_format | Q1300ST.LOG_FORMAT_SID: result.append('SID')
-        if log_format | Q1300ST.LOG_FORMAT_ELEVATION: result.append('ELEVATION')
-        if log_format | Q1300ST.LOG_FORMAT_AZIMUTH: result.append('AZIMUTH')
-        if log_format | Q1300ST.LOG_FORMAT_SNR: result.append('SNR')
-        if log_format | Q1300ST.LOG_FORMAT_RCR: result.append('RCR')
-        if log_format | Q1300ST.LOG_FORMAT_MILLISECOND: result.append('MILLISECOND')
-        if log_format | Q1300ST.LOG_FORMAT_DISTANCE: result.append('DISTANCE')
+        if log_format | BTQ1300ST.LOG_FORMAT_UTC: result.append('UTC')
+        if log_format | BTQ1300ST.LOG_FORMAT_VALID: result.append('VALID')
+        if log_format | BTQ1300ST.LOG_FORMAT_LATITUDE: result.append('LATITUDE')
+        if log_format | BTQ1300ST.LOG_FORMAT_LONGITUDE: result.append('LONGITUDE')
+        if log_format | BTQ1300ST.LOG_FORMAT_HEIGHT: result.append('HEIGHT')
+        if log_format | BTQ1300ST.LOG_FORMAT_SPEED: result.append('SPEED')
+        if log_format | BTQ1300ST.LOG_FORMAT_HEADING: result.append('HEADING')
+        if log_format | BTQ1300ST.LOG_FORMAT_DSTA: result.append('DSTA')
+        if log_format | BTQ1300ST.LOG_FORMAT_DAGE: result.append('DAGE')
+        if log_format | BTQ1300ST.LOG_FORMAT_PDOP: result.append('PDOP')
+        if log_format | BTQ1300ST.LOG_FORMAT_HDOP: result.append('HDOP')
+        if log_format | BTQ1300ST.LOG_FORMAT_VDOP: result.append('VDOP')
+        if log_format | BTQ1300ST.LOG_FORMAT_NSAT: result.append('NSAT')
+        if log_format | BTQ1300ST.LOG_FORMAT_SID: result.append('SID')
+        if log_format | BTQ1300ST.LOG_FORMAT_ELEVATION: result.append('ELEVATION')
+        if log_format | BTQ1300ST.LOG_FORMAT_AZIMUTH: result.append('AZIMUTH')
+        if log_format | BTQ1300ST.LOG_FORMAT_SNR: result.append('SNR')
+        if log_format | BTQ1300ST.LOG_FORMAT_RCR: result.append('RCR')
+        if log_format | BTQ1300ST.LOG_FORMAT_MILLISECOND: result.append('MILLISECOND')
+        if log_format | BTQ1300ST.LOG_FORMAT_DISTANCE: result.append('DISTANCE')
 
         return ','.join(result)
 
@@ -356,23 +356,23 @@ def main(argv=None):
     global log
 
     # port speeds are sorted lowest to fastest, choose slowest
-    test_speed = Q1300ST.PortSpeeds[0]
+    test_speed = BTQ1300ST.PortSpeeds[0]
 
     log = log.Log('mtkbabel.log', 10)
     log.critical('main: argv=%s' % str(argv))
 
     # set default values
-    devices = Q1300ST.find_devices(test_speed)
+    devices = BTQ1300ST.find_devices(test_speed)
     log.debug('Found devices=%s' % str(devices))
     if len(devices) == 0:
-        log.debug('No Q1300ST devices found!?')
-        print('No Q1300ST devices found!?')
+        log.debug('No BTQ1300ST devices found!?')
+        print('No BTQ1300ST devices found!?')
         return
     elif len(devices) == 1:
         device = devices[0]
         max_speed = test_speed
-        for speed in Q1300ST.PortSpeeds[1:]:
-            if not Q1300ST.check_device(device, speed):
+        for speed in BTQ1300ST.PortSpeeds[1:]:
+            if not BTQ1300ST.check_device(device, speed):
                 break
             max_speed = speed
         log.debug("Found device '%s', max speed=%s" % (str(device), str(max_speed)))
@@ -382,7 +382,7 @@ def main(argv=None):
         print('Found more than one device: %s' % ', '.join(devices))
         return
 
-    gps = Q1300ST(device, max_speed)
+    gps = BTQ1300ST(device, max_speed)
     gps.init()
     print('MTK Firmware: Version %s, Release %s, Model ID %s' % (gps.version, gps.release, gps.model_id))
     print('Log format: %s' % gps.describe_log_format(gps.log_format))
