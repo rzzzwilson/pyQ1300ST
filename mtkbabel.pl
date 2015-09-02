@@ -162,8 +162,8 @@ my $LOG_HAS_CHECKSUM_SEPARATOR = 1;
 #-------------------------------------------------------------------------
 my $debug    = $LOG_ERR;         # Default loggin level.
 #my $port     = '/dev/ttyUSB0';   # Default communication port.
-#my $port     = '/dev/ttyACM0';   	# Win7
-my $port = '/dev/tty.usbmodem1410';	# OSX
+my $port     = '/dev/ttyACM0';   	# Win7
+#my $port = '/dev/tty.usbmodem1410';	# OSX
 my $baudrate = 115200;           # Default port speed.
 
 # GPX global values.
