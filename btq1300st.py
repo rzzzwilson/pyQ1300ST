@@ -150,6 +150,54 @@ class BTQ1300ST(object):
         if self.sane and hasattr(self, 'serial') and self.serial:
             del self.serial
 
+#if ($opt_f and ($opt_t or $opt_w or $opt_c)) {
+#    # Compute the memory used by data log, round-up to the entire sector.
+#    if (($rec_method == $RCD_METHOD_OVP) or $opt_a) {
+#        # In OVERLAP mode we don't know where data ends; read the entire memory.
+#        $bytes_to_read = flash_memory_size($model_id);
+#    } else {
+#        # In STOP mode read from zero to Next Write Address.
+#        $sectors  = int($next_write_address / $SIZEOF_SECTOR);
+#        $sectors += 1 if (($next_write_address % $SIZEOF_SECTOR) != 0);
+#        $bytes_to_read = $sectors * $SIZEOF_SECTOR;
+#    }
+#
+#    printf(">> Retrieving %u (0x%08X) bytes of log data from device...\n", $bytes_to_read, $bytes_to_read);
+#    open($fp_log, ">${opt_f}.bin") or die("Cannot open file ${opt_f}.bin: $!");
+#    binmode($fp_log);
+#
+#    # Avoid reading the entire memory if we find a non-written sector.
+#    $non_written_sector_found = 0;
+#
+#    # NOTE: On a slow machine there was some problem getting the entire log data
+#    # via USB port with a single PMTK_LOG_REQ_DATA request.
+#    # The GPS device eventually begins to send packets longer than $SIZEOF_CHUNK,
+#    # apparently with corrupted data (failed checksum).
+#
+#    # To be safe we iterate requesting $SIZEOF_CHUNK bytes at time.
+#    for ($offset = 0; $offset < $bytes_to_read; $offset += $SIZEOF_CHUNK) {
+#        # Request log data (PMTK_LOG_REQ_DATA) from $offset to $bytes_to_read.
+#        packet_send(sprintf('PMTK182,7,%08X,%08X', $offset, $SIZEOF_CHUNK));
+#        # Start writing binary data to file and wait the final PMTK_ACK packet.
+#        packet_wait('PMTK001,182,7,3', 10);
+#        last if ($non_written_sector_found);
+#    }
+#    close($fp_log);
+#    undef($fp_log);
+#
+#    # Parse binary data and save GPX files.
+#    parse_log_data();
+#}
+
+
+#    if (($log_offset % $SIZEOF_SECTOR) == 0) {
+#        if (uc(substr($pkt, 19, $SIZEOF_SEPARATOR * 2)) eq ('FF' x $SIZEOF_SEPARATOR)) {
+#            printf("WARNING: Sector header at offset 0x%08X is non-written data\n", $log_offset);
+#            $non_written_sector_found = 1;
+#        }
+#    }
+
+
     def read_memory(self):
         """Read device memory."""
 
@@ -168,6 +216,8 @@ class BTQ1300ST(object):
                 sectors += 1
             bytes_to_read = sectors * self.SIZEOF_SECTOR
 
+        print('self.SIZEOF_SECTOR=%d, self.next_write_address=%d, sectors=%d' % (self.SIZEOF_SECTOR, self.next_write_address, sectors))
+        print('Retrieving %d (0x%08x) bytes of log data from device' % (bytes_to_read, bytes_to_read))
         log.info('Retrieving %d (0x%08x) bytes of log data from device' % (bytes_to_read, bytes_to_read))
 
         non_written_sector_found = False
@@ -180,9 +230,23 @@ class BTQ1300ST(object):
             if msg:
                 (address, buff) = msg.split(',')[2:]
                 data += buff
+
+                if (offset % self.SIZEOF_SECTOR) == 0:
+                    if msg[19:19+self.SIZEOF_SEPARATOR*2] == 'FF'*self.SIZEOF_SEPARATOR:
+                        print('WARNING: Sector header at offset 0x%08X is non-written data' % offset)
+                        break
+
                 offset += self.SIZEOF_CHUNK
+
+                percent = offset * 100.0 / bytes_to_read
+                sys.stdout.write('\rSaved log data: %6.2f%%' % percent)
+                sys.stdout.flush()
+
             self.recv('PMTK001,182,7,3', 10)
 
+        print('')
+
+        offset += self.SIZEOF_CHUNK
         data = data.decode('hex')
         log.debug('%d bytes read (expected %d), len(data)=%d' % (offset, bytes_to_read, len(data)))
         self.memory = data
@@ -471,14 +535,8 @@ class BTQ1300ST(object):
     def unpack(byte_array):
         """Unpack byte array into binary (LSB first)."""
 
-        log.debug("unpack: byte_array='%s'" % str(byte_array))
-        log.debug('unpack: type(byte_array)=%s' % type(byte_array))
-        for (i, v) in enumerate(byte_array):
-            log.debug("%d: %d" % (i, ord(v)))
-
         result = 0
         for val in reversed(byte_array):
-            log.debug('before: result=%s, val=%s' % (str(result), str(val)))
             result = result*256 + ord(val)
 
         return result
