@@ -150,74 +150,25 @@ class BTQ1300ST(object):
         if self.sane and hasattr(self, 'serial') and self.serial:
             del self.serial
 
-#if ($opt_f and ($opt_t or $opt_w or $opt_c)) {
-#    # Compute the memory used by data log, round-up to the entire sector.
-#    if (($rec_method == $RCD_METHOD_OVP) or $opt_a) {
-#        # In OVERLAP mode we don't know where data ends; read the entire memory.
-#        $bytes_to_read = flash_memory_size($model_id);
-#    } else {
-#        # In STOP mode read from zero to Next Write Address.
-#        $sectors  = int($next_write_address / $SIZEOF_SECTOR);
-#        $sectors += 1 if (($next_write_address % $SIZEOF_SECTOR) != 0);
-#        $bytes_to_read = $sectors * $SIZEOF_SECTOR;
-#    }
-#
-#    printf(">> Retrieving %u (0x%08X) bytes of log data from device...\n", $bytes_to_read, $bytes_to_read);
-#    open($fp_log, ">${opt_f}.bin") or die("Cannot open file ${opt_f}.bin: $!");
-#    binmode($fp_log);
-#
-#    # Avoid reading the entire memory if we find a non-written sector.
-#    $non_written_sector_found = 0;
-#
-#    # NOTE: On a slow machine there was some problem getting the entire log data
-#    # via USB port with a single PMTK_LOG_REQ_DATA request.
-#    # The GPS device eventually begins to send packets longer than $SIZEOF_CHUNK,
-#    # apparently with corrupted data (failed checksum).
-#
-#    # To be safe we iterate requesting $SIZEOF_CHUNK bytes at time.
-#    for ($offset = 0; $offset < $bytes_to_read; $offset += $SIZEOF_CHUNK) {
-#        # Request log data (PMTK_LOG_REQ_DATA) from $offset to $bytes_to_read.
-#        packet_send(sprintf('PMTK182,7,%08X,%08X', $offset, $SIZEOF_CHUNK));
-#        # Start writing binary data to file and wait the final PMTK_ACK packet.
-#        packet_wait('PMTK001,182,7,3', 10);
-#        last if ($non_written_sector_found);
-#    }
-#    close($fp_log);
-#    undef($fp_log);
-#
-#    # Parse binary data and save GPX files.
-#    parse_log_data();
-#}
-
-
-#    if (($log_offset % $SIZEOF_SECTOR) == 0) {
-#        if (uc(substr($pkt, 19, $SIZEOF_SEPARATOR * 2)) eq ('FF' x $SIZEOF_SEPARATOR)) {
-#            printf("WARNING: Sector header at offset 0x%08X is non-written data\n", $log_offset);
-#            $non_written_sector_found = 1;
-#        }
-#    }
-
-
     def read_memory(self):
         """Read device memory."""
 
-        # bomb out if device data already read
-        if self.memory is not None:
-            return
-
-        # read data
+        # compute the memory used by data log, round-up to the entire sector
         if self.rec_method == self.RCD_METHOD_OVF:
             # in OVERLAP mode we don't know where data ends, read it all
+            log.info('read_memory: OVERLAP mode, read entire memory')
             bytes_to_read = flash_memory_size(self.model_id)
         else:
-            # in STOP mode read from zero to NextWriteAddress
+            # in STOP mode we read from zero to NextWriteAddress
+            log.info('read_memory: STOP mode, read zero to next write position')
+            log.debug('.next_write_address=%06x (%d), .SIZEOF_SECTOR=%06x (%d)'
+                      % (self.next_write_address, self.next_write_address,
+                         self.SIZEOF_SECTOR, self.SIZEOF_SECTOR))
             sectors = int(self.next_write_address / self.SIZEOF_SECTOR)
             if self.next_write_address % self.SIZEOF_SECTOR:
                 sectors += 1
             bytes_to_read = sectors * self.SIZEOF_SECTOR
 
-        print('self.SIZEOF_SECTOR=%d, self.next_write_address=%d, sectors=%d' % (self.SIZEOF_SECTOR, self.next_write_address, sectors))
-        print('Retrieving %d (0x%08x) bytes of log data from device' % (bytes_to_read, bytes_to_read))
         log.info('Retrieving %d (0x%08x) bytes of log data from device' % (bytes_to_read, bytes_to_read))
 
         non_written_sector_found = False
@@ -225,6 +176,7 @@ class BTQ1300ST(object):
         offset = 0
         data = ''
         while offset < bytes_to_read:
+            # request the next CHUNK of data
             self.send('PMTK182,7,%08x,%08x' % (offset, self.SIZEOF_CHUNK))
             msg = self.recv('PMTK182,8', 10)
             if msg:
@@ -234,29 +186,23 @@ class BTQ1300ST(object):
                 if (offset % self.SIZEOF_SECTOR) == 0:
                     if msg[19:19+self.SIZEOF_SEPARATOR*2] == 'FF'*self.SIZEOF_SEPARATOR:
                         print('WARNING: Sector header at offset 0x%08X is non-written data' % offset)
+                        log.debug('read_memory: Got sector of non-written data at 0x%06x, ending read' % offset)
                         break
 
                 offset += self.SIZEOF_CHUNK
 
+                # update user 'percent read' display
                 percent = offset * 100.0 / bytes_to_read
                 sys.stdout.write('\rSaved log data: %6.2f%%' % percent)
                 sys.stdout.flush()
 
             self.recv('PMTK001,182,7,3', 10)
 
-        print('')
+        print('')   # terminate user 'percent read' display
 
-        offset += self.SIZEOF_CHUNK
-        data = data.decode('hex')
-        log.debug('%d bytes read (expected %d), len(data)=%d' % (offset, bytes_to_read, len(data)))
-        self.memory = data
-
-    def get_memory(self):
-        """Get device memory."""
-
-        if self.memory is None:
-            self.read_memory()
-        return self.memory
+        log.debug('%d bytes read (expected %d), len(data)=%d' % (offset+self.SIZEOF_CHUNK, bytes_to_read, len(data)))
+        self.memory = data.decode('hex')
+        log.debug('self.memory=%s' % data)
 
     def set_memory(self, memory):
         """Set device memory."""
@@ -473,62 +419,67 @@ class BTQ1300ST(object):
         offset += BTQ1300ST.SIZEOF_LONG
         log_failsect = sector_header[offset:offset+BTQ1300ST.SIZEOF_BYTE*32]
 
-        log.debug('log_count=%s' % binascii.b2a_hex(log_count))
-        log.debug('log_format=%s' % binascii.b2a_hex(log_format))
-        log.debug('log_status=%s' % binascii.b2a_hex(log_status))
-        log.debug('log_period=%s' % binascii.b2a_hex(log_period))
-        log.debug('log_distance=%s' % binascii.b2a_hex(log_distance))
-        log.debug('log_speed=%s' % binascii.b2a_hex(log_speed))
-        log.debug('log_failsect=%s' % binascii.b2a_hex(log_failsect))
-
-        log.debug('len(log_count)=%d' % len(log_count))
-        log.debug('len(log_format)=%d' % len(log_format))
+#        log.debug('log_count=0x%s' % binascii.b2a_hex(log_count))
+#        log.debug('log_format=0x%s' % binascii.b2a_hex(log_format))
+#        log.debug('log_status=%s' % binascii.b2a_hex(log_status))
+#        log.debug('log_period=%s' % binascii.b2a_hex(log_period))
+#        log.debug('log_distance=%s' % binascii.b2a_hex(log_distance))
+#        log.debug('log_speed=%s' % binascii.b2a_hex(log_speed))
+#        log.debug('log_failsect=%s' % binascii.b2a_hex(log_failsect))
+#
+#        log.debug('len(log_count)=%d' % len(log_count))
+#        log.debug('len(log_format)=%d' % len(log_format))
 
         log_count = BTQ1300ST.unpack(log_count)
         log_format = BTQ1300ST.unpack(log_format)
 
-        log.debug('log_count=%s' % str(log_count))
-        log.debug('log_format=%s' % str(log_format))
+        log.debug('parse_sector_header: log_count=0x%06x (%d)' % (log_count, log_count))
+        log.debug('parse_sector_header: log_format=0x%06x (%d)' % (log_format, log_format))
 
         return (log_count, log_format)
 
-    @staticmethod
-    def parse_log_data(data):
+    def parse_log_data(self, data):
         """Parse log data.
 
         data  bytearray of log data
         """
 
         fp = 0
-        size = len(data)
+        log_len = len(data)
         record_count_total = 0
+
+        log.debug('parse_log_data: log_len=0x%06x (%d)' % (log_len, log_len))
 
         while True:
             log.debug('>> Reading offset %08x' % fp)
 
+            log.debug('fp %% BTQ1300ST.SIZEOF_SECTOR=%d' % (fp % BTQ1300ST.SIZEOF_SECTOR))
             if (fp % BTQ1300ST.SIZEOF_SECTOR) == 0:
                 # reached the beginning of a log sector (every 0x10000 bytes),
                 # get header (0x200 bytes)
                 header = data[fp:fp + BTQ1300ST.SIZEOF_SECTOR_HEADER]
                 (expected_records_sector, log_format) = BTQ1300ST.parse_sector_header(header)
-                log.debug('expected_records_sector=%04x' % expected_records_sector)
-                log.debug('log_format=%08x' % log_format)
+                log.debug('expected_records_sector=0x%06x' % expected_records_sector)
+                log.debug('log_format=0x%06x (%s)' % (log_format, BTQ1300ST.describe_log_format(log_format)))
 
                 record_count_sector = 0
 
-            if record_count_total >= expected_records_total:
+            if record_count_total >= self.expected_records_total:
                 log.debug('Total record count: %d' % record_count_total)
                 break
 
+
+            log.debug('???: record_count_sector=%d, expected_records_sector=%d' % (record_count_sector, expected_records_sector))
             if record_count_sector >= expected_records_sector:
-                new_offset = BTQ1300ST.SIZEOF_SECTOR * (fp/BTQ1300ST.SIZEOF_SECTOR + 1)
+                log.debug('Calculating new offset')
+                new_offset = self.SIZEOF_SECTOR * (fp/self.SIZEOF_SECTOR + 1)
                 if new_offset < log_len:
                     fp = new_offset
                     continue
                 else:
                     # end of file
-                    pass
                     log.debug('Total record count: %d' % record_count_total)
+                    print('Total record count: %d' % record_count_total)
                 break
 
     @staticmethod
@@ -541,47 +492,75 @@ class BTQ1300ST(object):
 
         return result
 
+    @staticmethod
+    def flash_memory_size(model_id):
+        """Return flash memory size in MB given model ID string."""
 
+        # 8 Mbit = 1 MB
+        # [757/ZI v1, 757/ZI v2]
+        if model_id in ['1388', '5202']:
+            return (8 * 1024 * 1024 / 8)
+        # 16 Mbit = 2 MB
+        # [i-Blue 737/Qstarz 810/Polaris iBT-GPS/Holux M1000, Qstarz 815, i-Blue 747, Qstarz BT-Q1000/BGL-32, EB-85A]
+        if model_id in ['0051', '0002', '001b', '001d', '0131']:
+            return (16 * 1024 * 1024 / 8) 
+        # 32 Mbit = 4 MB
+        # [Holux M-1200E, Qstarz BT-Q1000P, 747 A+ GPS Trip Recorder, Pentagram PathFinder P 3106, iBlue 747A+, Holux M-1000C, Qstarz BT-1200]
+        if model_id in ['0000', '0005', '0006', '0008', '000F', '005C', '8300']:
+            return (32 * 1024 * 1024 / 8) 
 
+         # default: 2
+        return (16 * 1024 * 1024 / 8) 
 
+#        log.critical('flash_memory_size: Unrecognized ID: %s' % str(model_id))
+#        sys.exit(10)
 
 
 if __name__ == '__main__':
-    global log
+    ######
+    # This code is just to exercise the BTQ1300ST class a little.
+    # For more paranoid tests, see test_btq1300st.py
+    ######
 
-    # port speeds are sorted lowest to fastest, choose slowest
-    test_speed = BTQ1300ST.PortSpeeds[0]
+    def main():
+        # start the log
+        global log
+        log = log.Log('btq1300st.log', 10)
+    
+        # port speeds are sorted lowest to fastest, choose slowest speed
+        test_speed = BTQ1300ST.PortSpeeds[0]
+    
+        # find any BT-Q1300ST devices that are out there
+        devices = BTQ1300ST.find_devices(test_speed)
+        log.debug('Found devices=%s' % str(devices))
+        if len(devices) == 0:
+            log.debug('No BT-Q1300ST devices found!?')
+            print('No BT-Q1300ST devices found!?')
+            return 1
+        elif len(devices) == 1:
+            device = devices[0]
+            max_speed = test_speed
+            for speed in BTQ1300ST.PortSpeeds[1:]:
+                if not BTQ1300ST.check_device(device, speed):
+                    break
+                max_speed = speed
+            log.debug("Found device '%s', max speed=%s" % (str(device), str(max_speed)))
+            print("Found device '%s', max speed=%s" % (str(device), str(max_speed)))
+        else:
+            log.debug('Found more than one device: %s' % ', '.join(devices))
+            print('Found more than one device: %s' % ', '.join(devices))
+            return 2
+    
+        gps = BTQ1300ST(device, max_speed)
+        gps.init()
+        print('MTK Firmware: Version %s, Release %s, Model ID %s' % (gps.version, gps.release, gps.model_id))
+        print('Flash memory size=0x%06x (%d)' % (gps.flash_memory_size(gps.model_id), gps.flash_memory_size(gps.model_id)))
+        print('Log format: %s' % gps.describe_log_format(gps.log_format))
+        print('Recording method on memory full: %s' % gps.describe_recording_method(gps.rec_method))
+        print('Next write address: 0x%04x (%d)' % (gps.next_write_address, gps.next_write_address))
+        print('Number of records: %s (%d)' % (gps.expected_records_total, int(gps.expected_records_total, 16)))
+        gps.read_memory()
+        print('%d bytes of memory read' % len(gps.memory))
+        gps.parse_log_data(gps.memory)
 
-    log = log.Log('mtkbabel.log', 10)
-
-    # set default values
-    devices = BTQ1300ST.find_devices(test_speed)
-    log.debug('Found devices=%s' % str(devices))
-    if len(devices) == 0:
-        log.debug('No BT-Q1300ST devices found!?')
-        print('No BT-Q1300ST devices found!?')
-        sys.exit()
-    elif len(devices) == 1:
-        device = devices[0]
-        max_speed = test_speed
-        for speed in BTQ1300ST.PortSpeeds[1:]:
-            if not BTQ1300ST.check_device(device, speed):
-                break
-            max_speed = speed
-        log.debug("Found device '%s', max speed=%s" % (str(device), str(max_speed)))
-        print("Found device '%s', max speed=%s" % (str(device), str(max_speed)))
-    else:
-        log.debug('Found more than one device: %s' % ', '.join(devices))
-        print('Found more than one device: %s' % ', '.join(devices))
-        sys.exit()
-
-    gps = BTQ1300ST(device, max_speed)
-    gps.init()
-    print('MTK Firmware: Version %s, Release %s, Model ID %s' % (gps.version, gps.release, gps.model_id))
-    print('Log format: %s' % gps.describe_log_format(gps.log_format))
-    print('Recording method on memory full: %s' % gps.describe_recording_method(gps.rec_method))
-    print('Next write address: 0x%04x (%d)' % (gps.next_write_address, gps.next_write_address))
-    print('Number of records: %s (%d)' % (gps.expected_records_total, int(gps.expected_records_total, 16)))
-    mem = gps.get_memory()
-    print('%d bytes of memory read' % len(mem))
-    gps.parse_log_data(mem)
+    sys.exit(main())
