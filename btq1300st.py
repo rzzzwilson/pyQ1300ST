@@ -20,7 +20,7 @@ class BTQ1300ST(object):
     # this may need to be OS dependant
     DefaultDevicePath = '/dev/tty*'
 
-    PortSpeeds = [115200, 38400, 9600, 4800, 1200]
+    PortSpeeds = [115200, 57600, 38400, 19200, 14400, 9600, 4800]
     PortSpeeds.sort()
 
     Timeout = 0.50          # sec, make bigger if device is slow
@@ -91,7 +91,7 @@ class BTQ1300ST(object):
             return
         log.debug('****** device %s IS sane' % device)
 
-        ret = self.recv('PMTK001,0,')
+        ret = self.recv('PMTK001,0,3')
         if not ret or not ret.startswith('PMTK001,0,'):
             log.debug('device %s is not a BT-Q1300ST device' % device)
             return
@@ -175,6 +175,32 @@ class BTQ1300ST(object):
 
         offset = 0
         data = ''
+
+        while offset < bytes_to_read:
+            # request the next CHUNK of data
+            self.send('PMTK182,7,%08x,%08x' % (offset, self.SIZEOF_CHUNK))
+            msg = self.recv('PMTK182,8', 10)
+            if msg:
+                (address, buff) = msg.split(',')[2:]
+                data += buff
+
+                if (offset % self.SIZEOF_SECTOR) == 0:
+                    if msg[19:19+self.SIZEOF_SEPARATOR*2] == 'FF'*self.SIZEOF_SEPARATOR:
+                        print('WARNING: Sector header at offset 0x%08X is non-written data' % offset)
+                        log.debug('read_memory: Got sector of non-written data at 0x%06x, ending read' % offset)
+                        break
+
+                offset += self.SIZEOF_CHUNK
+
+                # update user 'percent read' display
+                percent = offset * 100.0 / bytes_to_read
+                sys.stdout.write('\rSaved log data: %6.2f%%' % percent)
+                sys.stdout.flush()
+
+            self.recv('PMTK001,182,7,3', 10)
+
+        print('')   # terminate user 'percent read' display
+
         while offset < bytes_to_read:
             # request the next CHUNK of data
             self.send('PMTK182,7,%08x,%08x' % (offset, self.SIZEOF_CHUNK))
@@ -203,6 +229,13 @@ class BTQ1300ST(object):
         log.debug('%d bytes read (expected %d), len(data)=%d' % (offset+self.SIZEOF_CHUNK, bytes_to_read, len(data)))
         self.memory = data.decode('hex')
         log.debug('self.memory=%s' % data)
+
+        with open('debug.bin', 'wb') as fd:
+            fd.write(self.memory)
+        with open('debug.asc', 'wb') as fd:
+            fd.write(data)
+        log.critical("Dumped memory to files 'debug.asc' (%d bytes) and 'debug.bin' (%d bytes)"
+                     % (len(data), len(self.memory)))
 
     def set_memory(self, memory):
         """Set device memory."""
@@ -468,7 +501,6 @@ class BTQ1300ST(object):
                 log.debug('Total record count: %d' % record_count_total)
                 break
 
-
             log.debug('???: record_count_sector=%d, expected_records_sector=%d' % (record_count_sector, expected_records_sector))
             if record_count_sector >= expected_records_sector:
                 log.debug('Calculating new offset')
@@ -561,6 +593,6 @@ if __name__ == '__main__':
         print('Number of records: %s (%d)' % (gps.expected_records_total, int(gps.expected_records_total, 16)))
         gps.read_memory()
         print('%d bytes of memory read' % len(gps.memory))
-        gps.parse_log_data(gps.memory)
+#        gps.parse_log_data(gps.memory)
 
     sys.exit(main())
