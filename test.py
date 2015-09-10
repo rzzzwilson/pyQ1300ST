@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import time
 import struct
 import binascii
 
+
+LOG_HAS_CHECKSUM_SEPARATOR = True
 
 SIZEOF_BYTE = 1
 SIZEOF_WORD = 2
@@ -25,10 +28,62 @@ SEP_TYPE_CHANGE_LOG_SPEED = 0x05
 SEP_TYPE_CHANGE_OVERLAP_STOP = 0x06
 SEP_TYPE_CHANGE_START_STOP_LOG = 0x07
 
+LOG_FORMAT_UTC = 0x00000001
+LOG_FORMAT_VALID = 0x00000002
+LOG_FORMAT_LATITUDE = 0x00000004
+LOG_FORMAT_LONGITUDE = 0x00000008
+LOG_FORMAT_HEIGHT = 0x00000010
+LOG_FORMAT_SPEED = 0x00000020
+LOG_FORMAT_HEADING = 0x00000040
+LOG_FORMAT_DSTA = 0x00000080
+LOG_FORMAT_DAGE = 0x00000100
+LOG_FORMAT_PDOP = 0x00000200
+LOG_FORMAT_HDOP = 0x00000400
+LOG_FORMAT_VDOP = 0x00000800
+LOG_FORMAT_NSAT = 0x00001000
+LOG_FORMAT_SID = 0x00002000
+LOG_FORMAT_ELEVATION = 0x00004000
+LOG_FORMAT_AZIMUTH = 0x00008000
+LOG_FORMAT_SNR = 0x00010000
+LOG_FORMAT_RCR = 0x00020000
+LOG_FORMAT_MILLISECOND = 0x00040000
+LOG_FORMAT_DISTANCE = 0x00080000
+
+RCD_METHOD_OVF = 1
+RCD_METHOD_STP = 2
+
+SIZEOF_LOG_UTC = SIZEOF_LONG
+SIZEOF_LOG_VALID = SIZEOF_WORD
+SIZEOF_LOG_LATITUDE = SIZEOF_DOUBLE
+SIZEOF_LOG_LONGITUDE = SIZEOF_DOUBLE
+SIZEOF_LOG_HEIGHT = SIZEOF_FLOAT
+SIZEOF_LOG_SPEED = SIZEOF_FLOAT
+SIZEOF_LOG_HEADING = SIZEOF_FLOAT
+SIZEOF_LOG_DSTA = SIZEOF_WORD
+SIZEOF_LOG_DAGE = SIZEOF_LONG
+SIZEOF_LOG_PDOP = SIZEOF_WORD
+SIZEOF_LOG_HDOP = SIZEOF_WORD
+SIZEOF_LOG_VDOP = SIZEOF_WORD
+SIZEOF_LOG_NSAT = SIZEOF_BYTE * 2
+SIZEOF_LOG_SID = SIZEOF_BYTE
+SIZEOF_LOG_SIDINUSE = SIZEOF_BYTE
+SIZEOF_LOG_SATSINVIEW = SIZEOF_WORD
+SIZEOF_LOG_ELEVATION = SIZEOF_WORD
+SIZEOF_LOG_AZIMUTH = SIZEOF_WORD
+SIZEOF_LOG_SNR = SIZEOF_WORD
+SIZEOF_LOG_RCR = SIZEOF_WORD
+SIZEOF_LOG_MILLISECOND = SIZEOF_WORD
+SIZEOF_LOG_DISTANCE = SIZEOF_DOUBLE
+
 
 def abort(msg):
     print(msg)
     sys.exit(10)
+
+def utc_time(t):
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', t)
+#    return time2str('%Y-%m-%dT%H:%M:%SZ', t, 'GMT')
+
 
 def unpack(byte_array):
     """Unpack byte array into binary (LSB first)."""
@@ -129,18 +184,17 @@ def parse_log_data(data):
 #        if (($log_len - tell($fp)) >= $SIZEOF_SEPARATOR) {
 #
 #            $buffer = my_read($fp, $SIZEOF_SEPARATOR);
+            # room enough for a record separator, check if we have one
             buffer = data[fp:fp+SIZEOF_SEPARATOR]
             print('len(buffer)=%d' % len(buffer))
-            print('buffer:\n%s' % str(buffer))
-            separator = buffer[:32]
-            print('len(separator)=%d' % len(separator))
-            print('binascii.b2a_hex(separator):\n%s' % binascii.b2a_hex(separator))
-            (buff_hdr, _, buff_tail) = struct.unpack('7s5s4s', buffer)
-            print('buff_hdr=%s' % str(buff_hdr))
+            print('buffer hex:\n%s' % binascii.b2a_hex(buffer))
+            (buff_hdr, buff_data, buff_tail) = struct.unpack('7s5s4s', buffer)
+            print('buff_hdr hex:=%s' % binascii.b2a_hex(buff_hdr))
 #
 #            if ((substr($buffer, 0, 7) eq (chr(0xaa) x 7)) and (substr($buffer, -4) eq (chr(0xbb) x 4))) {
             if buff_hdr == chr(0xaa) * 7 and buff_tail == chr(0xbb) * 4:
                 # Found a record separator.
+                print('Found a record separator')
 #                #----------------------------------------------------------
 #                # Found a record separator.
 #                #----------------------------------------------------------
@@ -161,6 +215,8 @@ def parse_log_data(data):
 #                next; # Search for the next record or record separator.
 #
 #            } elsif (substr($buffer, 0, 5) eq 'HOLUX') {
+            if buff_hdr.startswith('HOLUX'):
+                print('found Holux separator')
 #                #----------------------------------------------------------
 #                # Found Holux separator.
 #                #----------------------------------------------------------
@@ -196,6 +252,8 @@ def parse_log_data(data):
 #                next;
 #
 #            } elsif ($buffer eq (chr(0xff) x $SIZEOF_SEPARATOR)) {
+            elif buff_hdr == chr(0xff) * SIZEOF_SEPARATOR:
+                print('found non-written space')
 #                #----------------------------------------------------------
 #                # Found non-written space.
 #                #----------------------------------------------------------
@@ -229,6 +287,9 @@ def parse_log_data(data):
 #                }
 #
 #            } else {
+            else:
+                print('Found record data')
+
 #                # None of above, should be record data: rewind the file pointer so we can read it.
 #                seek($fp, -$SIZEOF_SEPARATOR, 1);
 #            }
@@ -241,7 +302,11 @@ def parse_log_data(data):
 #        $record_count_total++;
 #        $checksum = 0;
 #        printf("Reading log sector: record %u (%u/%u total)\n", $record_count_sector, $record_count_total, $expected_records_total) if ($debug >= $LOG_INFO);
-#
+        record_count_sector += 1
+        record_count_total += 1
+        checksum = 0
+        fp_offset = fp
+
 #        # Read each record field.
 #        undef($record_utc);
 #        if ($log_format & $LOG_FORMAT_UTC) {
@@ -250,7 +315,14 @@ def parse_log_data(data):
 #            $record_utc = utc_time(mtk2long($buffer));
 #            printf("Record UTC: %s %s\n", uc(unpack('H*', $buffer)), $record_utc) if ($debug >= $LOG_DEBUG);
 #        }
-#
+        record_utc = None
+        if log_format and LOG_FORMAT_UTC:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_UTC]
+            fp_offset += SIZEOF_LOG_UTC
+#            checksum ^= packet_checksum(buffer)
+            record_utc = utc_time(time.gmtime(unpack(buffer)))
+            print('DATA: record_utc=%s' % record_utc)
+
 #        undef($record_valid);
 #        if ($log_format & $LOG_FORMAT_VALID) {
 #            $buffer = my_read($fp, $SIZEOF_LOG_VALID);
@@ -258,7 +330,14 @@ def parse_log_data(data):
 #            $record_valid = mtk2unsignedword($buffer);
 #            printf("Record VALID: %s (0x%04X = %s)\n", uc(unpack('H*', $buffer)), $record_valid, describe_valid_mtk($record_valid)) if ($debug >= $LOG_DEBUG);
 #         }
-#
+        record_valid = None
+        if log_format & LOG_FORMAT_VALID:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_VALID]
+            fp_offset += SIZEOF_LOG_VALID
+#            checksum ^= packet_checksum(buffer)
+            record_valid = unpack(buffer)
+            print('DATA: record_valid=%06x' % record_valid)
+
 #        undef($record_latitude);
 #        if ($log_format & $LOG_FORMAT_LATITUDE) {
 #            $buffer = my_read($fp, $SIZEOF_LOG_LATITUDE);
@@ -266,7 +345,14 @@ def parse_log_data(data):
 #            $record_latitude = mtk2number($buffer, $SIZEOF_LOG_LATITUDE);
 #            printf("Record LATITUDE: %s (%.9f)\n", uc(unpack('H*', $buffer)), $record_latitude) if ($debug >= $LOG_DEBUG);
 #        }
-#
+        record_latitude = None
+        if log_format & LOG_FORMAT_LATITUDE:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_LATITUDE]
+            fp_offset += SIZEOF_LOG_LATITUDE
+#            checksum ^= packet_checksum(buffer)
+            record_latitude = unpack(buffer)
+            print('DATA: record_latitude=%d' % record_latitude)
+
 #        undef($record_longitude);
 #        if ($log_format & $LOG_FORMAT_LONGITUDE) {
 #            $buffer = my_read($fp, $SIZEOF_LOG_LONGITUDE);
@@ -274,6 +360,14 @@ def parse_log_data(data):
 #            $record_longitude = mtk2number($buffer, $SIZEOF_LOG_LONGITUDE);
 #            printf("Record LONGITUDE: %s (%.9f)\n", uc(unpack('H*', $buffer)), $record_longitude) if ($debug >= $LOG_DEBUG);
 #        }
+        record_longitude = None
+        if log_format & LOG_FORMAT_LONGITUDE:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_LONGITUDE]
+            fp_offset += SIZEOF_LOG_LONGITUDE
+#            checksum ^= packet_checksum(buffer)
+            record_longitude = unpack(buffer)
+            print('DATA: record_longitude=%d' % record_longitude)
+
 #
 #        undef($record_height);
 #        if ($log_format & $LOG_FORMAT_HEIGHT) {
@@ -282,7 +376,15 @@ def parse_log_data(data):
 #            $record_height = mtk2number($buffer, $SIZEOF_LOG_HEIGHT);
 #            printf("Record HEIGHT: %s (%.6f)\n", uc(unpack('H*', $buffer)), $record_height) if ($debug >= $LOG_DEBUG);
 #        }
-#
+
+        record_height = None
+        if log_format & LOG_FORMAT_HEIGHT:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_HEIGHT]
+            fp_offset += SIZEOF_LOG_HEIGHT
+#            checksum ^= packet_checksum(buffer)
+            record_height = unpack(buffer)
+            print('DATA: record_height=%d' % record_height)
+
 #        undef($record_speed);
 #        if ($log_format & $LOG_FORMAT_SPEED) {
 #            $buffer = my_read($fp, $SIZEOF_LOG_SPEED);
@@ -290,6 +392,14 @@ def parse_log_data(data):
 #            $record_speed = mtk2number($buffer, $SIZEOF_LOG_SPEED);
 #            printf("Record SPEED: %s (%.6f)\n", uc(unpack('H*', $buffer)), $record_speed) if ($debug >= $LOG_DEBUG);
 #        }
+        record_speed = None
+        if log_format & LOG_FORMAT_SPEED:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_SPEED]
+            fp_offset += SIZEOF_LOG_SPEED
+#            checksum ^= packet_checksum(buffer)
+            record_speed = unpack(buffer)
+            print('DATA: record_speed=%d' % record_speed)
+
 #
 #        undef($record_heading);
 #        if ($log_format & $LOG_FORMAT_HEADING) {
@@ -298,6 +408,14 @@ def parse_log_data(data):
 #            $record_heading = mtk2number($buffer, $SIZEOF_LOG_HEADING);
 #            printf("Record HEADING: %s (%.6f)\n", uc(unpack('H*', $buffer)), $record_heading) if ($debug >= $LOG_DEBUG);
 #        }
+        record_heading = None
+        if log_format & LOG_FORMAT_HEADING:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_HEADING]
+            fp_offset += SIZEOF_LOG_HEADING
+#            checksum ^= packet_checksum(buffer)
+            record_heading = unpack(buffer)
+            print('DATA: record_heading=%d' % record_heading)
+
 #
 #        undef($record_dsta);
 #        if ($log_format & $LOG_FORMAT_DSTA) {
@@ -306,7 +424,14 @@ def parse_log_data(data):
 #            $record_dsta = mtk2unsignedword($buffer);
 #            printf("Record DSTA: %s (%u)\n", uc(unpack('H*', $buffer)), $record_dsta) if ($debug >= $LOG_DEBUG);
 #        }
-#
+        record_dsta = None
+        if log_format & LOG_FORMAT_DSTA:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_DSTA]
+            fp_offset += SIZEOF_LOG_DSTA
+#            checksum ^= packet_checksum(buffer)
+            record_dsta = unpack(buffer)
+            print('DATA: record_dsta=%u' % record_dsta)
+
 #        undef($record_dage);
 #        if ($log_format & $LOG_FORMAT_DAGE) {
 #            $buffer = my_read($fp, $SIZEOF_LOG_DAGE);
@@ -314,7 +439,14 @@ def parse_log_data(data):
 #            $record_dage = mtk2long($buffer);
 #            printf("Record DAGE: %s (%u)\n", uc(unpack('H*', $buffer)), $record_dage) if ($debug >= $LOG_DEBUG);
 #        }
-#
+        record_dage = None
+        if log_format & LOG_FORMAT_DAGE:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_DAGE]
+            fp_offset += SIZEOF_LOG_DAGE
+#            checksum ^= packet_checksum(buffer)
+            record_dage = unpack(buffer)
+            print('DATA: record_dage=%u' % record_dage)
+
 #        undef($record_pdop);
 #        if ($log_format & $LOG_FORMAT_PDOP) {
 #            $buffer = my_read($fp, $SIZEOF_LOG_PDOP);
@@ -322,7 +454,14 @@ def parse_log_data(data):
 #            $record_pdop = mtk2unsignedword($buffer) / 100;
 #            printf("Record PDOP: %s (%.2f)\n", uc(unpack('H*', $buffer)), $record_pdop) if ($debug >= $LOG_DEBUG);
 #        }
-#
+        record_pdop = None
+        if log_format & LOG_FORMAT_PDOP:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_PDOP]
+            fp_offset += SIZEOF_LOG_PDOP
+#            checksum ^= packet_checksum(buffer)
+            record_pdop = unpack(buffer) / 100.0
+            print('DATA: record_pdop=%.2f' % record_pdop)
+
 #        undef($record_hdop);
 #        if ($log_format & $LOG_FORMAT_HDOP) {
 #            $buffer = my_read($fp, $SIZEOF_LOG_HDOP);
@@ -330,7 +469,14 @@ def parse_log_data(data):
 #            $record_hdop = mtk2unsignedword($buffer) / 100;
 #            printf("Record HDOP: %s (%.2f)\n", uc(unpack('H*', $buffer)), $record_hdop) if ($debug >= $LOG_DEBUG);
 #        }
-#
+        record_hdop = None
+        if log_format & LOG_FORMAT_HDOP:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_HDOP]
+            fp_offset += SIZEOF_LOG_HDOP
+#            checksum ^= packet_checksum(buffer)
+            record_hdop = unpack(buffer) / 100.0
+            print('DATA: record_hdop=%.2f' % record_hdop)
+
 #        undef($record_vdop);
 #        if ($log_format & $LOG_FORMAT_VDOP) {
 #            $buffer = my_read($fp, $SIZEOF_LOG_VDOP);
@@ -338,7 +484,14 @@ def parse_log_data(data):
 #            $record_vdop = mtk2unsignedword($buffer) / 100;
 #            printf("Record VDOP: %s (%.2f)\n", uc(unpack('H*', $buffer)), $record_vdop) if ($debug >= $LOG_DEBUG);
 #        }
-#
+        record_vdop = None
+        if log_format & LOG_FORMAT_VDOP:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_VDOP]
+            fp_offset += SIZEOF_LOG_VDOP
+#            checksum ^= packet_checksum(buffer)
+            record_vdop = unpack(buffer) / 100.0
+            print('DATA: record_vdop=%.2f' % record_vdop)
+
 #        undef($record_nsat_in_use);
 #        undef($record_nsat_in_view);
 #        if ($log_format & $LOG_FORMAT_NSAT) {
@@ -350,6 +503,15 @@ def parse_log_data(data):
 #            $record_nsat_in_use = mtk2byte($buffer);
 #            printf("Record NSAT: in view %u, in use %u\n", $record_nsat_in_view, $record_nsat_in_use) if ($debug >= $LOG_DEBUG);
 #        }
+        record_nsat_in_use = None
+        record_nsat_in_view = None
+        if log_format & LOG_FORMAT_NSAT:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_NSAT]
+            (record_nsat_in_use, record_nsat_in_view) = struct.unpack('<BB', buffer)
+            fp_offset += SIZEOF_LOG_NSAT
+#            checksum ^= packet_checksum(buffer)
+            print('DATA: record_nsat_in_use=%u, record_nsat_in_view=%u' % (record_nsat_in_use, record_nsat_in_view))
+
 #
 #        undef($record_satdata);
 #        if ($log_format & $LOG_FORMAT_SID) {
@@ -416,6 +578,14 @@ def parse_log_data(data):
 #            $record_rcr = mtk2unsignedword($buffer);
 #            printf("Record RCR: %s (%s)\n", uc(unpack('H*', $buffer)), describe_rcr_mtk($record_rcr)) if ($debug >= $LOG_DEBUG);
 #        }
+        record_rcr = None
+        if log_format & LOG_FORMAT_RCR:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_RCR]
+            fp_offset += SIZEOF_LOG_RCR
+#            checksum ^= packet_checksum(buffer)
+            record_rcr = unpack(buffer)
+            print('DATA: record_rcr=%u' % record_rcr)
+
 #
 #        undef($record_millisecond);
 #        if ($log_format & $LOG_FORMAT_MILLISECOND) {
@@ -424,6 +594,14 @@ def parse_log_data(data):
 #            $record_millisecond = mtk2unsignedword($buffer);
 #            printf("Record MILLISECOND: %s (%u)\n", uc(unpack('H*', $buffer)), $record_millisecond) if ($debug >= $LOG_DEBUG);
 #        }
+        record_millisecond = None
+        if log_format & LOG_FORMAT_MILLISECOND:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_MILLISECOND]
+            fp_offset += SIZEOF_LOG_MILLISECOND
+#            checksum ^= packet_checksum(buffer)
+            record_millisecond = unpack(buffer)
+            print('DATA: record_millisecond=%u' % record_millisecond)
+
 #
 #        undef($record_distance);
 #        if ($log_format & $LOG_FORMAT_DISTANCE) {
@@ -432,6 +610,14 @@ def parse_log_data(data):
 #            $record_distance = mtk2number($buffer, $SIZEOF_LOG_DISTANCE);
 #            printf("Record DISTANCE: %s (%.9f)\n", uc(unpack('H*', $buffer)), $record_distance) if ($debug >= $LOG_DEBUG);
 #        }
+        record_distance = None
+        if log_format & LOG_FORMAT_DISTANCE:
+            buffer = data[fp_offset:fp_offset+SIZEOF_LOG_DISTANCE]
+            fp_offset += SIZEOF_LOG_DISTANCE
+#            checksum ^= packet_checksum(buffer)
+            record_distance = unpack(buffer)
+            print('DATA: record_distance=%u' % record_distance)
+
 #
 #        if ($LOG_HAS_CHECKSUM_SEPARATOR) {
 #            # Read separator between data and checksum.
@@ -442,6 +628,11 @@ def parse_log_data(data):
 #                next if (! $opt_I);
 #            }
 #        }
+        if LOG_HAS_CHECKSUM_SEPARATOR:
+            buffer = data[fp_offset:fp_offset+SIZEOF_BYTE]
+            if buffer != '*':
+                abort('ERROR: Checksum separator error: expected char 0x%02X, found 0x%02X' % (ord('*'), ord(buffer)))
+
 #        # Read and verify checksum.
 #        $buffer = my_read($fp, $SIZEOF_BYTE);
 #        if ($checksum != ord($buffer)) {
